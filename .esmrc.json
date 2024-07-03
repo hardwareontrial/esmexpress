@@ -1,0 +1,9 @@
+{
+  "node": {
+    "exports": true,
+    "await": true,
+    "interop": true,
+    "dedefault": true,
+    "type": "module"
+  }
+}
