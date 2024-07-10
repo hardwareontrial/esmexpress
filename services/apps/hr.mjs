@@ -5,6 +5,8 @@ import fs from 'fs'
 import { randomString } from '@utils/helpers.mjs'
 import { createdStructure, createdStructure2, getAllLevelPosition, removeTopLevel } from '@utils/nestedPosition.mjs'
 import moment from 'moment';
+import { promisify } from 'node:util';
+import { exec } from 'node:child_process';
 
 const AppPositionModel = db.DatabaseA.models.AppHrPosition;
 const AppDeptModel = db.DatabaseA.models.AppHrDepartment;
@@ -465,6 +467,23 @@ class HRServices {
       throw error
     }
   };
+
+  async SFTPCheckConnection () {
+    const execAsync = promisify(exec);
+    const HOST = 'snftp.dataon.com';
+    const PORT = '2222';
+    
+    try {
+      const {stdout, stderr} = await exec(`nc -z -v -w5 ${HOST} ${PORT}`);
+      if(stderr) { console.error(`stderr: ${stderr}`); return false }
+      console.log(`stdout: ${stdout}`)
+      return true;
+    } catch (error) {
+      console.error(`Error: ${error.message}`)
+      return false;
+    }
+  };
+
   /** END ATENDANCE SECTION */
 }
 
