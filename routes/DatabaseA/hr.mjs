@@ -11,7 +11,7 @@ import { deptValidator } from '@middlewares/validators/hr.mjs'
 
 const route = Router()
 
-route.post('/test', checkToken, checkRoutePermission(['manage.all']), testServices)
+route.get('/test', checkToken, checkRoutePermission(['manage.all']), testServices)
 
 route.get('/position/all', checkToken, checkRoutePermission(['manage.all']), getPositionData);
 route.post('/position/create', checkToken, checkRoutePermission(['manage.all']), createPosition);
