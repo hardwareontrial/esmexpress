@@ -11,6 +11,7 @@ import '@models/DatabaseA/phonebook.mjs'
 import '@models/DatabaseA/simple_todo.mjs'
 import '@models/DatabaseA/app_jobs.mjs'
 import '@models/DatabaseA/app_log.mjs'
+import '@models/DatabaseA/okm.mjs'
 import '@models/DatabaseB/fingerspot.mjs'
 
 // Relation
@@ -22,6 +23,7 @@ import '@models/relations/DatabaseA/ga_inventaris.mjs'
 import '@models/relations/DatabaseA/reservation.mjs'
 import '@models/relations/DatabaseA/phonebook.mjs'
 import '@models/relations/DatabaseA/simple_todo.mjs'
+import '@models/relations/DatabaseA/okm.mjs'
 import '@models/relations/DatabaseB/fingerspot.mjs'
 
 // console.log(orm)
