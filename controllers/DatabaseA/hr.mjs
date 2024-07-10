@@ -220,8 +220,9 @@ const testServices = async (req, res) => {
     // const a1 = [6, 6]
     // const a2 = [5,6,7]
     // const tester = combinedDiffArray(a1, a2)
-    const tester = true
-    res.status(200).send({success: true, message: 'Success!', data: tester})
+    // const tester = true
+    const SFTPIsConnected = await HRServices.SFTPCheckConnection()
+    res.status(200).send({success: true, message: 'Success!', data: SFTPIsConnected})
   } catch (error) {
     res.status(500).send({success: false, message: 'Failed!', data: error.message || error})
   }
