@@ -2,6 +2,7 @@
 node_modules
 /dist
 sql
+public/storage/app/
 
 # local env files
 .env.local
