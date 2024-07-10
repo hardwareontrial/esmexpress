@@ -28,6 +28,7 @@ for (let i=0; i < databases.length; ++i){
 }
 
 // sequelize['DatabaseA'].sync({force: false});
+// sequelize['DatabaseA'].sync();
 sequelize.Sequelize = Sequelize;
 
 export default sequelize
