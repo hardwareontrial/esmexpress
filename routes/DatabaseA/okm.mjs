@@ -4,10 +4,16 @@ import checkRoutePermission from '@middlewares/routes/permissions.mjs'
 import {
   getAllMaterial, createMaterial, detailMaterial, getMaterialPaginate, updateMaterial, updateMaterialContent,
   getAllQuestionsCollection, detailQuestionCollection, createQuestionCollection,
+  testing,
 } from '@controllers/DatabaseA/okm.mjs'
 import multer from 'multer'
 
 import { inputMaterialValidator, inputMaterialContentValidator } from '@middlewares/validators/okm.mjs'
+
+const uploadStorage = multer.memoryStorage();
+const upload = multer({
+  storage: uploadStorage,
+});
 
 const route = Router();
 
@@ -20,6 +26,7 @@ route.post('/material/:id/content/:mContentId', checkToken, checkRoutePermission
 
 route.get('/questions', checkToken, checkRoutePermission(['manage.all']), getAllQuestionsCollection);
 route.get('/question/:id', checkToken, checkRoutePermission(['manage.all']), detailQuestionCollection);
-route.post('/question', checkToken, checkRoutePermission(['manage.all']), multer({storage: multer.memoryStorage()}).single('file'), createQuestionCollection);
+route.post('/question', checkToken, checkRoutePermission(['manage.all']), multer({storage: multer.memoryStorage()}).any('fileExcel'), createQuestionCollection);
 
+route.post('/testing', checkToken, checkRoutePermission(['manage.all']), testing);
 export default route;

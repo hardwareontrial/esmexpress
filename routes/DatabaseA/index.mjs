@@ -9,6 +9,7 @@ import hrRoute from '@routes/DatabaseA/hr.mjs'
 import phonebookRoute from '@routes/DatabaseA/phonebook.mjs'
 import authRoute from '@routes/DatabaseA/auth.mjs'
 import reservationRoute from '@routes/DatabaseA/reservation.mjs'
+import okmRoute from '@routes/DatabaseA/okm.mjs'
 
 const route = Router()
 
@@ -23,5 +24,6 @@ route.use('/hr', hrRoute)
 route.use('/phonebook', phonebookRoute)
 route.use('/auth', authRoute)
 route.use('/reservation', reservationRoute)
+route.use('/okm', okmRoute)
 
 export default route
