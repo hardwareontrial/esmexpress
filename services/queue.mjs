@@ -1,6 +1,8 @@
 import db from '@services/orm/index.mjs'
 import moment from 'moment';
+import JobServices from '@services/apps/jobs.mjs';
 import HRServices from '@services/apps/hr.mjs';
+import OKMServices from '@services/apps/okm.mjs';
 
 class QueueService {
   constructor() {
@@ -43,22 +45,22 @@ class QueueService {
     return this.queueList[0]
   };
 
-  async createQueue(data) {
-    // format {priority: '', payload: {type: '', otherdata: ''}}
-    try {
-      const newQueue = await this.DBAJobsQueue.create({
-        priority: data.priority,
-        payload: JSON.stringify(data.payload),
-        attemps: 0,
-        reserved_at: null,
-        created_at: moment(),
-      });
-      const getQueue = await this.getQueueAll();
-      return newQueue
-    } catch (error) {
-      throw error
-    }
-  };
+  // async createQueue(data) {
+  //   // format {priority: '', payload: {type: '', otherdata: ''}}
+  //   try {
+  //     const newQueue = await this.DBAJobsQueue.create({
+  //       priority: data.priority,
+  //       payload: JSON.stringify(data.payload),
+  //       attemps: 0,
+  //       reserved_at: null,
+  //       created_at: moment(),
+  //     });
+  //     const getQueue = await this.getQueueAll();
+  //     return newQueue
+  //   } catch (error) {
+  //     throw error
+  //   }
+  // };
 
   async reservedByType(queue) {
     try {
@@ -78,12 +80,22 @@ class QueueService {
       let result;
       if(parsedPayload.type === 'sync-attn') {
         result = await HRServices.synchronizeAttFromSource(parsedPayload.startDate, parsedPayload.endDate)
-        if(result){ this.createQueue({ priority: 'medium', payload: {type: 'export-text-attn', startDate: parsedPayload.startDate, endDate: parsedPayload.endDate} }) }
-      }
-      else if(parsedPayload.type === 'export-text-attn') {
-        result = await HRServices.exportToTextFile(parsedPayload.startDate, parsedPayload.endDate)
-      }
-      else {
+        if(result){ 
+          // this.createQueue({ priority: 'medium', payload: {type: 'export-text-attn', startDate: parsedPayload.startDate, endDate: parsedPayload.endDate} })
+          const createExportAttnJob = await JobServices.createJobQueue({
+            priority: 'medium',
+            payload: {
+              type: 'export-text-attn',
+              startDate: parsedPayload.startDate,
+              endDate: parsedPayload.endDate
+            }
+          })
+        }
+      } else if(parsedPayload.type === 'export-text-attn') {
+        result = await HRServices.exportToTextFile(parsedPayload.startDate, parsedPayload.endDate);
+      } else if(parsedPayload.type === 'process-excel-okm-question') {
+        result = await OKMServices.readQuestionFromExcel(parsedPayload.collection_id, parsedPayload.filename)
+      } else {
         result = new Error('Error executedByType')
       }
 
@@ -103,49 +115,64 @@ class QueueService {
           const executedByType = await this.executedByType(queue)
           if(executedByType) {
             const unlocking = await queue.update({ lock: 0 });
-            const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
+            // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
+            const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
             return true
           } else {
-            const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
-            const logging = await this.createFailedQueue(queue, executedByType);
+            // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
+            // const logging = await this.createFailedQueue(queue, executedByType);
+            const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
+            const createFailedQueue = await JobServices.createFailedJobQueue({
+              queue: queue,
+              error: executedByType,
+            });
             return true
           }
         } else {
           const unlocking = await queue.update({ lock: 0 });
-          const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
-          const logging = await this.createFailedQueue(queue, 'Maximum number attemps.');
+          // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
+          // const logging = await this.createFailedQueue(queue, 'Maximum number attemps.');
+          const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
+          const createFailedQueue = await JobServices.createFailedJobQueue({
+            queue: queue,
+            error: `Maximum number attemps.`,
+          });
           return true
         }
       }
     } catch (error) {
       const unlocking = await queue.update({ lock: 0 });
-      const logging = await this.createFailedQueue(queue, error.message || error)
+      // const logging = await this.createFailedQueue(queue, error.message || error)
+      const createFailedQueue = await JobServices.createFailedJobQueue({
+        queue: queue,
+        error: error.message || error,
+      });
       console.error(error)     
     }
   };
 
-  async deleteQueue(payload) {
-    try {
-      const deleteQueue = await this.DBAJobsQueue.destroy({ where: {uuid: payload.uuid} });
-      const getQueue = await this.getQueueAll();
-      return true
-    } catch (error) {
-      throw error
-    }
-  };
+  // async deleteQueue(payload) {
+  //   try {
+  //     const deleteQueue = await this.DBAJobsQueue.destroy({ where: {uuid: payload.uuid} });
+  //     const getQueue = await this.getQueueAll();
+  //     return true
+  //   } catch (error) {
+  //     throw error
+  //   }
+  // };
 
-  async createFailedQueue(queue, error) {
-    try {
-      const failed = await this.DBAJobsFailed.create({
-        uuid: queue.uuid,
-        priority: queue.priority,
-        payload: queue.payload,
-        exception: error,
-      })
-    } catch (error) {
+  // async createFailedQueue(queue, error) {
+  //   try {
+  //     const failed = await this.DBAJobsFailed.create({
+  //       uuid: queue.uuid,
+  //       priority: queue.priority,
+  //       payload: queue.payload,
+  //       exception: error,
+  //     })
+  //   } catch (error) {
       
-    }
-  };
+  //   }
+  // };
 }
 
 export default new QueueService()
