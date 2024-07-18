@@ -88,10 +88,19 @@ const detailQuestionCollection = async (req, res) => {
 };
 const createQuestionCollection = async (req, res) => {
   try {
+    // console.log(req)
     const created = await OKMServices.createQuestionCollection({body: req.body, file: req.file}, req.userAuthenticated.user_id)
     res.status(200).send({success: true, message: 'Data Created!', data: created})
   } catch (error) {
     res.status(500).send({success: false, message: 'Failed to creating data!', data: error.message || error})
+  }
+};
+const testing = async (req, res) => {
+  try {
+    const testing = await OKMServices.readQuestionFromExcel();
+    res.status(200).send({success: true, message: 'Tested!', data: testing})
+  } catch (error) {
+    res.status(500).send({success: false, message: 'Failed to testing function!', data: error.message || error})
   }
 };
 /** END QUESTION SECTION */
@@ -99,4 +108,5 @@ const createQuestionCollection = async (req, res) => {
 export {
   getAllMaterial, createMaterial, detailMaterial, getMaterialPaginate, updateMaterial, updateMaterialContent,
   getAllQuestionsCollection, detailQuestionCollection, createQuestionCollection,
+  testing,
 }
