@@ -1,5 +1,6 @@
 import { Model, DataTypes } from 'sequelize'
 import db from '@services/orm/sequelize.mjs'
+import moment from 'moment';
   
 class OKMMaterial extends Model {};
 class OKMMaterialContent extends Model {};
@@ -7,6 +8,7 @@ class OKMQuestionContent extends Model {};
 class OKMQuestionCollection extends Model {};
 class OKMQuestionAnswerOptions extends Model {};
 class OKMQuestionUploadStatus extends Model {};
+class OKMLogs extends Model {};
 
 OKMMaterial.init({
   id: {type: DataTypes.BIGINT(20).UNSIGNED, autoIncrement: true, primaryKey: true, allowNull: false},
@@ -106,11 +108,28 @@ OKMQuestionUploadStatus.init({
   id: {type: DataTypes.BIGINT(20).UNSIGNED, autoIncrement: true, primaryKey: true, allowNull: false},
   status: {type: DataTypes.STRING(255), allowNull: false},
   question_coll_id: {type: DataTypes.BIGINT(20).UNSIGNED, allowNull: false},
+  failed_at: {type: DataTypes.DATE(), allowNull: false, defaultValue: moment().format('YYYY-MM-DD HH:mm:ss')},
 },{
   sequelize: db.DatabaseA,
   modelName: 'OKMQuestionUploadStatus',
   freezeTableName: true,
   tableName: 'tbl_okm_question_upload_status',
+  timestamps: false,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  underscored: false,
+  schema: db.DatabaseA.config.database,
+});
+
+OKMLogs.init({
+  id: {type: DataTypes.BIGINT(20).UNSIGNED, autoIncrement: true, primaryKey: true, allowNull: false},
+  message: {type: DataTypes.TEXT('long'), allowNull: false},
+  created_by: {type: DataTypes.STRING(255), allowNull: false},
+},{
+  sequelize: db.DatabaseA,
+  modelName: 'OKMLogs',
+  freezeTableName: true,
+  tableName: 'tbl_okm_logs',
   timestamps: true,
   createdAt: 'created_at',
   updatedAt: 'updated_at',
