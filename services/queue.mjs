@@ -1,178 +1,146 @@
-import db from '@services/orm/index.mjs'
-import moment from 'moment';
-import JobServices from '@services/apps/jobs.mjs';
+import pc from "picocolors"
+import JobServices from '@services/jobs.mjs';
 import HRServices from '@services/apps/hr.mjs';
 import OKMServices from '@services/apps/okm.mjs';
 
-class QueueService {
+class  QueueService {
   constructor() {
-    this.DBAJobsQueue = db.DatabaseA.models.JobsQueue;
-    this.DBAJobsFailed = db.DatabaseA.models.JobsFailed;
-    this.queueList = []
-    this.priorityOrder = { high: 1, medium: 2, low: 3 };
+    this.queue = null;
   }
 
-  async getQueueAll() {
-  
-    const  sortByPriorityAndCreatedAt = (a,b) => {
-      if (a.reserved_at !== null && b.reserved_at === null) {
-        return -1;
-      } else if (a.reserved_at === null && b.reserved_at !== null) {
-        return 1;
-      }
-  
-      const priorityComparison = this.priorityOrder[a.priority] - this.priorityOrder[b.priority];
-      if (priorityComparison !== 0) {
-        return priorityComparison;
-      }
-  
-      return moment(a.created_at).diff(moment(b.created_at));
-    };
-  
-    try {
-      const getQueue = await this.DBAJobsQueue.findAll()
-      // const queueToJson = getQueue.toJSON()
-      const sortedQueue = getQueue?.sort(sortByPriorityAndCreatedAt)
-      this.queueList = sortedQueue
-      return sortedQueue
-    } catch (error) {
-      throw error
-    }
-  };
-  
-  async frontQueue() {
-    if(this.queueList.length <= 0) { return null }
-    return this.queueList[0]
+  setQueue (value) {
+    this.queue = value;
   };
 
-  // async createQueue(data) {
-  //   // format {priority: '', payload: {type: '', otherdata: ''}}
-  //   try {
-  //     const newQueue = await this.DBAJobsQueue.create({
-  //       priority: data.priority,
-  //       payload: JSON.stringify(data.payload),
-  //       attemps: 0,
-  //       reserved_at: null,
-  //       created_at: moment(),
-  //     });
-  //     const getQueue = await this.getQueueAll();
-  //     return newQueue
-  //   } catch (error) {
-  //     throw error
-  //   }
-  // };
-
-  async reservedByType(queue) {
+  async initQueue() {
     try {
-      const reserved = await queue.update({
-        reserved_at: moment()
-      })
-      return reserved
+      const job = await JobServices.getInFrontJob();
+      if(!job) {
+        console.log(pc.bgCyan(pc.white(`QUEUE: No Queue`)));
+        return
+      }
+      this.setQueue(job);
+
+      if(job.lock !== 1) {
+        this.queue.lock = 1;
+        await this.updateQueue();
+      }
+
+      const attemptProcessing = await this.processing();
+      if(attemptProcessing) {
+        this.queue.lock = 0;
+        await this.updateQueue();
+        await this.deleteQueue(this.queue.uuid);
+        console.log(pc.bgGreen(pc.white(`QUEUE: ${this.queue.uuid} done`)));
+        this.setQueue(null);
+      }
     } catch (error) {
-      throw error
+      console.log(pc.bgRed(pc.white(`QUEUE: ${error}`)));
+      throw error;
     }
   };
 
-  async executedByType(queue) {
+  async creatingQueue(priority, data) {
     try {
-      const parsedPayload = JSON.parse(queue.payload)
-      
-      let result;
-      if(parsedPayload.type === 'sync-attn') {
-        result = await HRServices.synchronizeAttFromSource(parsedPayload.startDate, parsedPayload.endDate)
-        if(result){ 
-          // this.createQueue({ priority: 'medium', payload: {type: 'export-text-attn', startDate: parsedPayload.startDate, endDate: parsedPayload.endDate} })
-          const createExportAttnJob = await JobServices.createJobQueue({
-            priority: 'medium',
-            payload: {
-              type: 'export-text-attn',
-              startDate: parsedPayload.startDate,
-              endDate: parsedPayload.endDate
-            }
-          })
-        }
-      } else if(parsedPayload.type === 'export-text-attn') {
-        result = await HRServices.exportToTextFile(parsedPayload.startDate, parsedPayload.endDate);
-      } else if(parsedPayload.type === 'process-excel-okm-question') {
-        result = await OKMServices.readQuestionFromExcel(parsedPayload.collection_id, parsedPayload.filename)
+      const creating = await JobServices.createJob(priority, data);
+      return creating;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  async updateQueue(){
+    try {
+      const updating = await JobServices.updateJob(
+        this.queue.uuid,
+        this.queue.priority,
+        this.queue.data,
+        this.queue.attempt,
+        this.queue.reserved_at,
+        this.queue.created_at,
+        this.queue.lock
+      );
+      return updating;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  async createFailQueue(error) {
+    try {
+      this.queue.data = this.queue.data;
+      const creating = await JobServices.createFailJob(this.queue, error);
+      return creating;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  async deleteQueue(uuid) {
+    try {
+      const deleting = await JobServices.deleteJob(uuid);
+      return deleting;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  async processing() {
+    try {
+      if(this.queue.attempt < 3) {
+        this.queue.attempt = this.queue.attempt +1;
+        await this.updateQueue();
+        const attempting = await this.executedByType(this.queue.data);
+        return attempting;
       } else {
-        result = new Error('Error executedByType')
+        await this.createFailQueue('Max attempts reach');
+        await this.deleteQueue(this.queue.uuid);
+        this.setQueue(null);
       }
-
-      return result
     } catch (error) {
-      throw error
+      return false;
     }
   };
 
-  async processingQueue(queue) {
-    try {
-      if(!queue.lock) {
-        const locking = await queue.update({ lock: 1 });
+  async executedByType(data) {
+    const parsedData = JSON.parse(data);
 
-        if(queue.attemps < 3) {
-          const attempting = await queue.update({ attemps: queue.attemps +1 });
-          const executedByType = await this.executedByType(queue)
-          if(executedByType) {
-            const unlocking = await queue.update({ lock: 0 });
-            // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
-            const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
-            return true
-          } else {
-            // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
-            // const logging = await this.createFailedQueue(queue, executedByType);
-            const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
-            const createFailedQueue = await JobServices.createFailedJobQueue({
-              queue: queue,
-              error: executedByType,
-            });
-            return true
-          }
-        } else {
-          const unlocking = await queue.update({ lock: 0 });
-          // const deletedQueue = await this.deleteQueue({uuid: queue.uuid});
-          // const logging = await this.createFailedQueue(queue, 'Maximum number attemps.');
-          const deletedQueue = await JobServices.deleteJobQueue({uuid: queue.uuid});
-          const createFailedQueue = await JobServices.createFailedJobQueue({
-            queue: queue,
-            error: `Maximum number attemps.`,
-          });
-          return true
-        }
+    if(parsedData.type === 'sync-attn') {
+      try {
+        const syncAttn = await HRServices.synchronizeAttFromSource(parsedData.startDate, parsedData.endDate);
+        await this.creatingQueue('medium', {type: 'export-text-attn', startDate: parsedData.startDate, endDate: parsedData.endDate});
+        return syncAttn;
+      } catch (error) {
+        await this.createFailQueue(error.message || error)
+        return false;
       }
-    } catch (error) {
-      const unlocking = await queue.update({ lock: 0 });
-      // const logging = await this.createFailedQueue(queue, error.message || error)
-      const createFailedQueue = await JobServices.createFailedJobQueue({
-        queue: queue,
-        error: error.message || error,
-      });
-      console.error(error)     
+    }
+
+    else if(parsedData.type === 'export-text-attn') {
+      try {
+        const exportTextAttn = await HRServices.exportToTextFile(parsedData.startDate, parsedData.endDate);
+        return exportTextAttn;
+      } catch (error) {
+        await this.createFailQueue(error.message || error)
+        return false;
+      }
+    }
+
+    else if(parsedData.type === 'process-excel-okm-question') {
+      try {
+        const processExcelOkmQuestion = await OKMServices.readQuestionFromExcel(parsedData.collection_id, parsedData.filename)
+        return processExcelOkmQuestion;
+      } catch (error) {
+        await this.createFailQueue(error.message || error)
+        return false;
+      }
+    }
+
+    else {
+      await this.createFailQueue('No options available')
+      return false;
     }
   };
-
-  // async deleteQueue(payload) {
-  //   try {
-  //     const deleteQueue = await this.DBAJobsQueue.destroy({ where: {uuid: payload.uuid} });
-  //     const getQueue = await this.getQueueAll();
-  //     return true
-  //   } catch (error) {
-  //     throw error
-  //   }
-  // };
-
-  // async createFailedQueue(queue, error) {
-  //   try {
-  //     const failed = await this.DBAJobsFailed.create({
-  //       uuid: queue.uuid,
-  //       priority: queue.priority,
-  //       payload: queue.payload,
-  //       exception: error,
-  //     })
-  //   } catch (error) {
-      
-  //   }
-  // };
 }
 
 export default new QueueService()
