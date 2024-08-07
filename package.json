@@ -26,6 +26,7 @@
     "mysql2": "^3.9.7",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.13",
+    "picocolors": "^1.0.1",
     "qr-code-styling-node": "^1.5.0",
     "sequelize": "^6.37.3",
     "socket.io": "^4.7.5"
@@ -35,15 +36,15 @@
   },
   "aliases": {
     "@root": ".",
-    "@configs":"configs",
-    "@controllers":"controllers",
-    "@jobs":"jobs",
-    "@middlewares":"middlewares",
-    "@models":"models",
-    "@public":"public",
-    "@routes":"routes",
+    "@configs": "configs",
+    "@controllers": "controllers",
+    "@jobs": "jobs",
+    "@middlewares": "middlewares",
+    "@models": "models",
+    "@public": "public",
+    "@routes": "routes",
     "@services": "services",
-    "@sockets":"sockets",
-    "@utils":"utils"
+    "@sockets": "sockets",
+    "@utils": "utils"
   }
 }
