@@ -1,6 +1,9 @@
 import db from '@services/orm/sequelize.mjs'
 
-const { AppHrDepartment, OKMMaterial, OKMMaterialContent, OKMQuestionContent, OKMQuestionCollection, OKMQuestionAnswerOptions } = db.DatabaseA.models;
+const {
+  AppHrDepartment, OKMMaterial, OKMMaterialContent, OKMQuestionContent, OKMQuestionCollection, OKMQuestionAnswerOptions,
+  OKMQuestionUploadStatus, OKMLogs
+} = db.DatabaseA.models;
   
 AppHrDepartment.hasMany(OKMMaterial, {
   as: 'deptMaterialOKM',
@@ -60,4 +63,10 @@ OKMQuestionAnswerOptions.belongsTo(OKMQuestionContent, {
   as: 'partContent',
   foreignKey: 'question_content_id',
   targetKey: 'id',
+});
+
+OKMQuestionCollection.hasMany(OKMQuestionUploadStatus, {
+  as: 'uploadedStatus',
+  foreignKey: 'question_coll_id',
+  sourceKey: 'id',
 });
