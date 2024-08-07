@@ -16,7 +16,6 @@ for (let i=0; i < databases.length; ++i){
     dialect: dbPath.dialect,
     host: dbPath.host,
     port: dbPath.port,
-    dialect: dbPath.dialect,
     timezone: dbPath.timezone,
     pool: {
       max: 10,
