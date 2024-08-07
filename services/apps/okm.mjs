@@ -4,12 +4,15 @@ import path from 'path'
 import fs from 'fs'
 import ExcelJS from 'exceljs';
 import { Readable } from 'stream';
+import JobServices from '@services/jobs.mjs';
 
-const OKMMaterialModel = db.DatabaseA.models.OKMMaterial;
+const OKMMaterial = db.DatabaseA.models.OKMMaterial;
 const OKMMaterialContent = db.DatabaseA.models.OKMMaterialContent;
 const OKMQuestionContent = db.DatabaseA.models.OKMQuestionContent;
 const OKMQuestionCollection = db.DatabaseA.models.OKMQuestionCollection;
 const OKMQuestionAnswerOptions = db.DatabaseA.models.OKMQuestionAnswerOptions;
+const OKMQuestionUploadStatus = db.DatabaseA.models.OKMQuestionUploadStatus;
+const OKMLogs = db.DatabaseA.models.OKMLogs;
 const AppUserModel = db.DatabaseA.models.AppUser;
 const AppDeptModel = db.DatabaseA.models.AppHrDepartment;
 
@@ -23,7 +26,7 @@ class OKMServices {
   /** Material Section */
   async getAllMaterials(authUserId) {
     try {
-      const materials = await OKMMaterialModel.findAll({
+      const materials = await OKMMaterial.findAll({
         include: [
           {model: OKMMaterialContent, as: 'materialContents'},
           {model: AppDeptModel, as: 'materialDeptOKM'}
@@ -73,7 +76,7 @@ class OKMServices {
       const materialFile = payload.file;
 
       materialCreateTrx = await db.DatabaseA.transaction();
-      const newMaterial = await OKMMaterialModel.create({
+      const newMaterial = await OKMMaterial.create({
         title: title.toUpperCase(),
         sinopsis: sinopsis,
         level: level,
@@ -108,7 +111,7 @@ class OKMServices {
       if(materialFile) {
         const filename = await this.createDateName('materialContent');
         filenameWithExt = `${filename}.${materialFile.mimetype.split('/')[1]}`;
-        filePath = path.join(this.appStorage, `okm/material/${filenameWithExt}`);
+        filePath = `okm/material/${filenameWithExt}`;
         await this.storeMediaOkm(materialFile, filePath);
       }
 
@@ -116,7 +119,7 @@ class OKMServices {
       const newMaterialContent = await OKMMaterialContent.create({
         material_id: material_id,
         description: description,
-        filepath: `material/${filenameWithExt}`,
+        filepath: filePath,
       }, { transaction: materialContentCreate });
       await materialContentCreate.commit();
 
@@ -139,7 +142,7 @@ class OKMServices {
       const materialId = payload.materialId;
 
       materialUpdate = await db.DatabaseA.transaction();
-      const updateMaterial = await OKMMaterialModel.update({
+      const updateMaterial = await OKMMaterial.update({
         title: title.toUpperCase(),
         sinopsis: sinopsis,
         level: level,
@@ -171,21 +174,21 @@ class OKMServices {
       if(materialFile) {
         const filename = await this.createDateName('materialContent');
         filenameWithExt = `${filename}.${materialFile.mimetype.split('/')[1]}`;
-        filePath = path.join(this.appStorage, `okm/material/${filenameWithExt}`);
+        filePath = `okm/material/${filenameWithExt}`;
         await this.storeMediaOkm(materialFile, filePath);
       }
 
       materialContentUpdate = await db.DatabaseA.transaction();
       const updateMaterialContent = await OKMMaterialContent.update({
         description: description,
-        filepath: `material/${filenameWithExt}`,
+        filepath: filePath,
       },{
         where: {id: payload.materialContentId},
         transaction: materialContentUpdate
       });
       await materialContentUpdate.commit();
 
-      if(materialFile) { await this.removeMediaOkm(path.join(this.appStorage, lastData.filepath)); }
+      if(materialFile) { await this.removeMediaOkm(filePath); }
 
       const updated = await this.detailMaterialContent(payload.materialContentId);
 
@@ -201,7 +204,7 @@ class OKMServices {
 
   async detailMaterial(id) {
     try {
-      const material = await OKMMaterialModel.findOne({
+      const material = await OKMMaterial.findOne({
         where: {id: id},
         include: [
           {model: OKMMaterialContent, as: 'materialContents'},
@@ -219,7 +222,7 @@ class OKMServices {
       const materialContent = await OKMMaterialContent.findOne({
         where: {id: id},
         include: [
-          {model: OKMMaterialModel, as: 'contentMaterial'}
+          {model: OKMMaterial, as: 'contentMaterial'}
         ],
       });
       return materialContent;
@@ -286,7 +289,6 @@ class OKMServices {
   async createQuestionCollection(payload, authUserId) {
     let createQuestionCollTrx;
     try {
-      console.log(payload)
       const { matContentId, title, level } = payload.body;
       const isActive = JSON.parse(payload.body.isActive);
       const fileQuestion = payload.file;
@@ -300,9 +302,26 @@ class OKMServices {
         is_active: isActive,
         created_by: creator?.fname,
       },{ transaction: createQuestionCollTrx });
-      createQuestionCollTrx.commit();
+      await createQuestionCollTrx.commit();
 
-      return createColl;
+      if(fileQuestion) {
+        const filename = await this.createDateName('excelQuestion');
+        const filenameWithExt = `${filename}.${fileQuestion.mimetype.split('/')[1]}`;
+        const filePath = `okm/temporary/${filenameWithExt}`;
+        await this.storeMediaOkm(fileQuestion, filePath);
+        const creatingJob = await JobServices.createJobQueue({
+          priority: 'medium',
+          payload: { type: 'process-excel-okm-question', collection_id: createColl.id, filename: filenameWithExt }
+        });
+        const creatingUploadStatus = this.createQuestionUploadStatus({
+          body: { status: 'queue', question_coll_id: createColl.id },
+        }, authUserId);
+
+        if(!creatingJob || !creatingUploadStatus) { await this.removeMediaOkm(filePath); }
+      }
+
+      const created = await this.detailQuestionCollection(createColl.id, authUserId);
+      return created;
     } catch (error) {
       if(createQuestionCollTrx) { await createQuestionCollTrx.rollback() }
       throw error
@@ -317,7 +336,8 @@ class OKMServices {
         where: {id: id},
         include: [
           {model: OKMQuestionContent, as: 'questions', include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]},
-          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterialModel, as: 'contentMaterial'}]},
+          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial'}]},
+          {model: OKMQuestionUploadStatus, as: 'uploadedStatus', order: [['id', 'DESC']]},
         ],
       });
       return questionCollection;
@@ -380,8 +400,10 @@ class OKMServices {
     };
 
     try {
-      const filePath = path.join(this.appStorage, 'okm/temporary/1721104330.xlsx');
-      const question_coll_id = 1;
+      // const filePath = path.join(this.appStorage, 'okm/temporary/1721104330.xlsx');
+      // const question_coll_id = 1;
+      const filePath = path.join(this.appStorage, `okm/temporary/${filename}`);
+      const question_coll_id = collection_id;
 
       const arrayImages = [];
       const dataFromExcel = [];
@@ -393,8 +415,12 @@ class OKMServices {
       const rowLimit = worksheet.actualRowCount;
       const initializeForm = worksheet.getCell('A1').value;
       
-      if(initializeForm !== 'Form_by_IT') { return false }
-      if(startRow > rowLimit) { return false }
+      if(initializeForm !== 'Form_by_IT') {
+        return new Error(`No Valid Form (missing 'Form_by_IT' indicator.)`);
+      }
+      if(startRow > rowLimit) {
+        return new Error(`No Data from file.`);
+      }
       
       const rowRange = Array.from({length: rowLimit - startRow +1}, (_, i) => i +startRow);
       worksheet.getImages().forEach(image => {
@@ -474,7 +500,7 @@ class OKMServices {
           fileMediaQstWithExt = `${filename}.${question.media.imageData.extension}`;
           pathMediaQst = `okm/question/collection/${question.collection_id}/Q_${index+1}/${fileMediaQstWithExt}`;
           const bufferData = question.media.imageData.buffer;
-          await this.storeMediaOkm({buffer: bufferData}, path.join(this.appStorage, pathMediaQst));
+          await this.storeMediaOkm({buffer: bufferData}, pathMediaQst);
         }
 
         const creatingContent = await this.createQuestionContent({
@@ -496,7 +522,7 @@ class OKMServices {
               fileMediaAnsOpt = `${filename}.${answeropt.media.imageData.extension}`;
               pathAnsOpt = `okm/question/collection/${question.collection_id}/Q_${index+1}/${fileMediaAnsOpt}`;
               const bufferData = answeropt.media.imageData.buffer;
-              await this.storeMediaOkm({buffer: bufferData}, path.join(this.appStorage, pathAnsOpt));
+              await this.storeMediaOkm({buffer: bufferData}, pathAnsOpt);
             }
 
             await this.createQuestionOption({
@@ -515,9 +541,68 @@ class OKMServices {
       throw error
     }
   };
+
+  async createQuestionUploadStatus(payload, authUserId) {
+    let createUploadStatusTrx;
+    try {
+      const { upload_id, status, question_coll_id } = payload.body;
+      
+      createUploadStatusTrx = await db.DatabaseA.transaction();
+      const creatingUpload = await OKMQuestionUploadStatus.create({
+        status: status,
+        question_coll_id: question_coll_id,
+      },{ transaction: createUploadStatusTrx });
+      await createUploadStatusTrx.commit();
+
+      return creatingUpload;
+    } catch (error) {
+      if(createUploadStatusTrx) { await createUploadStatusTrx.rollback(); }
+      throw error;
+    }
+  };
+
+  // async updateQuestionUploadStatus(payload, authUserId) {
+  //   let updateUploadStatusTrx;
+  //   try {
+  //     const { upload_id, status, question_coll_id } = payload.body;
+  //     updateUploadStatusTrx = await db.DatabaseA.transaction();
+  //     const updatingUpload = await OKMQuestionUploadStatus.create({
+  //       status: status,
+  //       question_coll_id: question_coll_id,
+  //     },{
+  //       where: {id: upload_id},
+  //       transaction: updateUploadStatusTrx,
+  //     });
+  //     await updateUploadStatusTrx.commit();
+  //     return updatingUpload;
+  //   } catch (error) {
+  //     if(updateUploadStatusTrx) { await updateUploadStatusTrx.rollback(); }
+  //     throw error;
+  //   }
+  // };
   /** End Question Section */
 
   /** Misc */
+  async createOkmLogs(payload, authUserId) {
+    let createLogTrx;
+    try {
+      const userauth = await this.getUser(authUserId);
+      const { message } = payload.body;
+
+      createLogTrx = await db.DatabaseA.transaction();
+      const logging = await OKMLogs.create({
+        message: message,
+        created_by: userauth?.fname,
+      }, {transaction: createLogTrx });
+      await createLogTrx.commit();
+
+      return logging;
+    } catch (error) {
+      if(createLogTrx) { await createLogTrx.rollback(); }
+      throw error;
+    }
+  };
+
   async getUser(id) {
     try {
       const user = await AppUserModel.findOne({
@@ -543,10 +628,10 @@ class OKMServices {
 
   async storeMediaOkm(file, filePath) {
     try {
-      fs.mkdirSync(path.dirname(filePath),{ recursive: true });
-      fs.writeFileSync(filePath, file.buffer);
-
-      return filePath
+      const fullPath = path.join(this.appStorage, filePath);
+      fs.mkdirSync(path.dirname(fullPath),{ recursive: true });
+      fs.writeFileSync(fullPath, file.buffer);
+      return true
     } catch (error) {
       throw error
     }
@@ -554,13 +639,18 @@ class OKMServices {
 
   async removeMediaOkm(filePath) {
     try {
-      fs.unlinkSync(filePath)
+      fs.unlinkSync(path.join(this.appStorage, filePath))
       return true
     } catch (error) {
       throw error
     }
   };
 
+  async getFileByFieldName (files, fieldName){
+    const file = files.find(obj => obj.fieldname === fieldName);
+    if(file) { return file }
+    else { throw new Error('Field name not found'); }
+  };
 }
 
 export default new OKMServices()
