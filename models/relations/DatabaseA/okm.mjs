@@ -1,8 +1,10 @@
 import db from '@services/orm/sequelize.mjs'
+import {response} from "express";
 
 const {
   AppHrDepartment, OKMMaterial, OKMMaterialContent, OKMQuestionContent, OKMQuestionCollection, OKMQuestionAnswerOptions,
-  OKMQuestionUploadStatus, OKMLogs
+  OKMQuestionUploadStatus, OKMLogs, OKMQuiz, OKMParticipant, OKMParticipantResponse, OKMCertificate,
+  AppUser,
 } = db.DatabaseA.models;
   
 AppHrDepartment.hasMany(OKMMaterial, {
@@ -69,4 +71,46 @@ OKMQuestionCollection.hasMany(OKMQuestionUploadStatus, {
   as: 'uploadedStatus',
   foreignKey: 'question_coll_id',
   sourceKey: 'id',
+});
+
+OKMQuiz.hasMany(OKMParticipant, {
+  as: 'participants',
+  foreignKey: 'quiz_id',
+  sourceKey: 'id',
+});
+
+OKMQuiz.belongsTo(OKMMaterialContent, {
+  as: 'content_material',
+  foreignKey: 'material_content_id',
+  targetKey: 'id',
+});
+
+OKMQuiz.belongsTo(OKMQuestionCollection, {
+  as: 'detailQuestion',
+  foreignKey: 'question_coll_id',
+  targetKey: 'id',
+});
+
+OKMQuiz.hasOne(OKMCertificate, {
+  as: 'certificate',
+  foreignKey: 'quiz_id',
+  sourceKey: 'id',
+})
+
+OKMParticipant.hasMany(OKMParticipantResponse, {
+  as: 'responses',
+  foreignKey: 'participant_id',
+  sourceKey: 'id',
+});
+
+OKMParticipant.belongsTo(AppUser, {
+  as: 'user',
+  foreignKey: 'user_nik',
+  targetKey: 'nik',
+});
+
+OKMParticipantResponse.belongsTo(OKMQuestionContent, {
+  as: 'detailQuestionContent',
+  foreignKey: 'question_content_id',
+  targetKey: 'id',
 });
