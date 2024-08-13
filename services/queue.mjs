@@ -16,22 +16,30 @@ class  QueueService {
     try {
       const job = await JobServices.getInFrontJob();
       if(!job) {
-        console.log(pc.bgCyan(pc.white(`QUEUE: No Queue`)));
+        console.log(pc.bgCyan(pc.black(`QUEUE: No Queue`)));
         return
       }
-      this.setQueue(job);
 
-      if(job.lock !== 1) {
-        this.queue.lock = 1;
-        await this.updateQueue();
+      if(job.lock === 1) {
+        console.log(pc.bgYellow(pc.black(`QUEUE: On performing job.`)));
+        return
       }
+
+      this.setQueue(job);
+      this.queue.lock = 1;
+      await this.updateQueue();
 
       const attemptProcessing = await this.processing();
       if(attemptProcessing) {
+        console.log(pc.bgGreen(pc.black(`QUEUE: ${this.queue.uuid} done`)));
         this.queue.lock = 0;
         await this.updateQueue();
         await this.deleteQueue(this.queue.uuid);
-        console.log(pc.bgGreen(pc.white(`QUEUE: ${this.queue.uuid} done`)));
+        this.setQueue(null);
+      } else {
+        console.log(pc.bgRed(pc.white(`QUEUE: ${this.queue.uuid} failed`)));
+        this.queue.lock = 0;
+        await this.updateQueue();
         this.setQueue(null);
       }
     } catch (error) {
@@ -95,7 +103,8 @@ class  QueueService {
       } else {
         await this.createFailQueue('Max attempts reach');
         await this.deleteQueue(this.queue.uuid);
-        this.setQueue(null);
+        return false;
+        // this.setQueue(null);
       }
     } catch (error) {
       return false;
