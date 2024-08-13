@@ -4,7 +4,7 @@ import bodyParser from 'body-parser'
 import path from 'path'
 
 import '@services/orm/index.mjs'
-import '@services/scheduler.mjs'
+// import '@services/scheduler.mjs'
 import route from '@routes/index.mjs'
 
 const app = express()
