@@ -1,3 +1,5 @@
+import db from '@services/orm/index.mjs'
+
 export function randomString(len, charSet) {
   charSet = charSet || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   var randomString = ''
@@ -28,7 +30,9 @@ export function UCWord(word) {
 export function combinedDiffArray(array1, array2) {
   const combinedSet = new Set([...array1, ...array2]);
   return Array.from(combinedSet)
-  // const diffArray1 = array1.filter(element1 => !array2.includes(element1))
-  // const diffArray2 = array2.filter(element2 => !array1.includes(element2))
-  // return [...diffArray1, ...diffArray2]
+}
+
+export async function getNextAutoIncrementValue(tableName) {
+  const [result] = await db.DatabaseA.query(`SHOW TABLE STATUS LIKE '${tableName}'`);
+  return result[0].Auto_increment;
 }
