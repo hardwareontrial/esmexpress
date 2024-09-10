@@ -38,7 +38,6 @@ class HRServices {
       throw error
     }
   };
-
   async createPosition(payload, authUserId) { // payload: {body: req.body}
     let newPositionTransaction;
     try {
@@ -72,7 +71,6 @@ class HRServices {
       throw error
     }
   };
-
   async detailPosition(payload, authUserId) { // payload: {id: req.params.id}
     try {
       const levels = await getAllLevelPosition();
@@ -92,7 +90,6 @@ class HRServices {
       throw error
     }
   };
-
   async updatePosition(payload, authUserId) { // payload: {body: req.body, id: req.params.id}
     let updateTransaction;
     try {
@@ -135,7 +132,6 @@ class HRServices {
       throw error
     }
   };
-
   async massAssignPositionToUser(userIds, positionId) {
     let assignPositionTransaction;
     try {
@@ -179,7 +175,6 @@ class HRServices {
       throw error
     }
   };
-
   async createDept(payload, authUserId) { // payload: {body: req.body}
     let newDeptTransaction;
     try {
@@ -208,7 +203,6 @@ class HRServices {
       throw error
     }
   };
-
   async detailDept(payload, authUserId) { // payloa d: {id: req.params.id}
     try {
       const levels = await getAllLevelPosition();
@@ -232,7 +226,6 @@ class HRServices {
       throw error
     }
   };
-
   async updateDept(payload, authUserId) { // payload: {body: req.body, id: req.params.id}
     let updateDeptTransaction;
     try {
@@ -264,7 +257,6 @@ class HRServices {
       throw error
     }
   };
-
   async massAssignDeptToPosition(positionIds, deptId) {
     let assignDeptTransaction;
     try {
@@ -302,7 +294,6 @@ class HRServices {
       throw error
     }
   };
-
   async createAttendance(data) { // data = []
     let createAttendance;
     try {
@@ -331,7 +322,6 @@ class HRServices {
       throw error
     }
   };
-
   async synchronizeAttFromSource(startDate, endDate) {
     const name = await this.transformDateToName(startDate, endDate)
     try {
@@ -348,7 +338,6 @@ class HRServices {
       throw error
     }
   };
-
   async exportToTextFile(startDate, endDate) {
     try {
       const getAttData = await this.rangeAttnData(startDate, endDate);
@@ -359,7 +348,6 @@ class HRServices {
       throw error
     }
   };
-
   async rangeAttnData(startDate, endDate) {
     try {
       const data = await this.getAllAttendanceData();
@@ -372,7 +360,6 @@ class HRServices {
       throw error
     }
   };
-
   async getAllAttendanceData(authUserId) {
     try {
       const data = await this.DBATmpAttn.findAll({
@@ -383,7 +370,6 @@ class HRServices {
       throw error
     }
   };
-
   async storeTextAtt(dataToExport, name) {
     const tranformedName = await this.transformNameToDate(name)
     try {
@@ -410,11 +396,9 @@ class HRServices {
       throw error
     }
   };
-
   async transformDateToName(startDate, endDate) {
     return `${startDate.replace(/-|\s|:/g,"")}-${endDate.replace(/-|\s|:/g,"")}`
   };
-
   async transformNameToDate(name) {
     const startDate = name.substring(0, 8);
     const startTime = name.substring(8, 14);
@@ -441,7 +425,6 @@ class HRServices {
       throw error
     }
   };
-
   async getAttnLogs(authUserId) {
     try {
       const logs = await this.DBATmpAttnLog.findAll({
@@ -452,7 +435,6 @@ class HRServices {
       throw error
     }
   };
-
   async attnStatistic(authUserId) {
     try {
       const attnLogs = await this.getAttnLogs();
@@ -467,7 +449,6 @@ class HRServices {
       throw error
     }
   };
-
   async SFTPCheckConnection () {
     const execAsync = promisify(exec);
     const HOST = 'snftp.dataon.com';
