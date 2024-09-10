@@ -1,12 +1,12 @@
-import db from '@services/orm/index.mjs'
-import { Op, where } from 'sequelize'
-import path from 'path'
-import fs from 'fs'
+import db from '@services/orm/index.mjs';
+import path from 'path';
+import fs from 'fs/promises';
 import ExcelJS from 'exceljs';
-import { Readable } from 'stream';
-import JobServices from '@services/jobs.mjs';
 import pc from 'picocolors';
+import JobServices from '@services/jobs.mjs';
+import HRServices from '@services/apps/hr.mjs';
 import { getNextAutoIncrementValue } from '@utils/helpers.mjs';
+import { Op } from 'sequelize';
 
 const OKMMaterial = db.DatabaseA.models.OKMMaterial;
 const OKMMaterialContent = db.DatabaseA.models.OKMMaterialContent;
@@ -20,636 +20,474 @@ const AppDeptModel = db.DatabaseA.models.AppHrDepartment;
 
 class OKMServices {
   constructor() {
-    // this.tmpStorage = path.join(path.resolve(), '/public/storage/app/okm/temporary/');
-    // this.okmStorage = path.join(path.resolve(), '/public/storage/app/okm/');
     this.appStorage = path.join(path.resolve(), '/public/storage/app/');
   }
 
-  /** Material Section */
-  async getAllMaterials(authUserId) {
+  /** MATERIAL */
+  async getAllMaterial(authUserId) {
     try {
-      const materials = await OKMMaterial.findAll({
+      const data = await OKMMaterial.findAll({
         include: [
-          {model: OKMMaterialContent, as: 'materialContents'},
+          {
+            model: OKMMaterialContent,
+            as: 'materialContents',
+            include: [
+              {
+                model: OKMQuestionCollection,
+                as: 'contentQuestions',
+                include: [
+                  {
+                    model: OKMQuestionContent,
+                    as: 'questions',
+                    include: [{model: OKMQuestionAnswerOptions, as: 'options'}]
+                  }
+                ]
+              }
+            ]
+          },
           {model: AppDeptModel, as: 'materialDeptOKM'}
         ],
       });
-      return materials
+      return data;
     } catch (error) {
-      throw error
+      throw error;
     }
   };
-
-  async getAllMaterialsPaginate(payload) {
+  async createMaterial(authUserId, title, sinopsis, level, deptId, isActive, creator) {
+    let createMaterialTrx;
     try {
-      let currentPage = payload.currentPage;
-      let itemPerPage = payload.limit; 
-      let query = payload.query;
-      const materials = await this.getAllMaterials();
-      const filtered = materials.filter(item => item.title.toLowerCase().includes(query?.toLowerCase()));
-      const countFilteredArray = filtered.length
-      const totalPages = Math.ceil(countFilteredArray/itemPerPage)
-      currentPage = Math.min(Math.max(1, currentPage), totalPages)
-      const startIndex = (currentPage -1)*itemPerPage
-      const endIndex = startIndex + itemPerPage
-      const itemsForPage = filtered.slice(startIndex, endIndex)
-      const from = ((currentPage -1)* itemPerPage) +1
-      const to = Math.min((currentPage * itemPerPage), countFilteredArray)
-      return {
-        items: itemsForPage,
-        total: countFilteredArray,
-        currentPage: Math.max(currentPage, 1),
-        totalPages: totalPages,
-        per_page: itemPerPage,
-        from: Math.max(from, 0),
-        to: to,
-      }
-    } catch (error) {
-      throw error      
-    }
-  };
-
-  async createMaterial(payload, authUserId) {
-    let materialCreateTrx;
-    try {
-      const { title, sinopsis, level, deptId } = payload.body;
-      const isActive = payload.body.isActive;
-      const authUser = await this.getUser(authUserId);
-      const materialFile = payload.file;
-
-      materialCreateTrx = await db.DatabaseA.transaction();
-      const newMaterial = await OKMMaterial.create({
+      createMaterialTrx = await db.DatabaseA.transaction();
+      const creating = await OKMMaterial.create({
         title: title.toUpperCase(),
         sinopsis: sinopsis,
         level: level,
         department_id: deptId,
         is_active: isActive,
-        created_by: authUser?.fname
-      }, { transaction: materialCreateTrx });
-      await materialCreateTrx.commit();
-
-      if(materialFile) {
-        payload.body.material_id = newMaterial.id;
-        const storingMaterialContent = await this.createMaterialContent(payload, authUserId)
-        if(!storingMaterialContent) { return storingMaterialContent }
-      }
-      
-      const created = await this.detailMaterial(newMaterial.id)
-      
-      return created
+        created_by: creator,
+      },{transaction: createMaterialTrx});
+      await createMaterialTrx.commit();
+      return creating;
     } catch (error) {
-      if(materialCreateTrx) { await materialCreateTrx.rollback(); }
-      throw error
+      if(createMaterialTrx) { await createMaterialTrx.rollback(); }
+      throw error;
     }
   };
-
-  async detailMaterial(id) {
+  async detailMaterial(authUserId, id) {
     try {
-      const material = await OKMMaterial.findOne({
-        where: {id: id},
+      const data = await OKMMaterial.findOne({
+        where: { id: id },
         include: [
-          {model: OKMMaterialContent, as: 'materialContents'},
+          {
+            model: OKMMaterialContent,
+            as: 'materialContents',
+            include: [
+              {
+                model: OKMQuestionCollection,
+                as: 'contentQuestions',
+                include: [
+                  {
+                    model: OKMQuestionContent,
+                    as: 'questions',
+                    include: [{model: OKMQuestionAnswerOptions, as: 'options'}]
+                  }
+                ]
+              }
+            ]
+          },
           {model: AppDeptModel, as: 'materialDeptOKM'}
         ],
       });
-      return material;
+      return data;
     } catch (error) {
-      throw error
+      
     }
   };
-
-  async updateMaterial(payload, authUserId) {
-    let materialUpdate;
+  async updateMaterial(authUserId, id, title, sinopsis, level, deptId, isActive, creator) {
+    let updateMaterialTrx;
     try {
-      const { title, sinopsis, level, deptId } = payload.body;
-      const isActive = payload.body.isActive;
-      const authUser = await this.getUser(authUserId);
-      const materialId = payload.materialId;
-
-      materialUpdate = await db.DatabaseA.transaction();
-      const updateMaterial = await OKMMaterial.update({
+      updateMaterialTrx = await db.DatabaseA.transaction();
+      const updating = await OKMMaterial.update({
         title: title.toUpperCase(),
         sinopsis: sinopsis,
         level: level,
         department_id: deptId,
         is_active: isActive,
+        created_by: creator,
       },{
-        where: {id: materialId},
-        transaction: materialUpdate,
+        where: {id: id},
+        transaction: updateMaterialTrx,
       });
-      await materialUpdate.commit();
-
-      const updated = await this.detailMaterial(materialId);
-
-      return updated;
+      await updateMaterialTrx.commit();
+      return updating;
     } catch (error) {
-      if(materialUpdate) { await materialUpdate.rollback() }
-      throw error
+      if(updateMaterialTrx) { await updateMaterialTrx.rollback(); }
+      throw error;
     }
   };
+  async deleteMaterial(authUserId, id) {};
 
-  async deleteMaterial(id) {};
-  /** End Material Section */
-
-  /** Material Content Section */
-  async getAllMaterialContent() {
+  /** MATERIAL CONTENT */
+  async getAllMaterialContent(authUserId) {
     try {
       const data = await OKMMaterialContent.findAll({
         include: [
+          {
+            model: OKMQuestionCollection,
+            as: 'contentQuestions',
+            include: [
+              {
+                model: OKMQuestionContent,
+                as: 'questions',
+                include: [{model: OKMQuestionAnswerOptions, as: 'options'}]
+              }
+            ]
+          },
           {model: OKMMaterial, as: 'contentMaterial'},
         ],
       });
-      return data
+      return data;
     } catch (error) {
       throw error;
     }
   };
-
-  async createMaterialContent(payload, authUserId) {
-    let materialContentCreate, filenameWithExt, filePath;
+  async createMaterialContent(authUserId, materialId, description, filePath, viewCount, isActive) {
+    let materialContentTrx;
     try {
-      const { material_id, description } = payload.body;
-      const materialFile = payload.file;
-      const authUser = await this.getUser(authUserId);
-
-      if(materialFile) {
-        const filename = await this.createDateName('materialContent');
-        filenameWithExt = `${filename}.${materialFile.mimetype.split('/')[1]}`;
-        filePath = `okm/material/${filenameWithExt}`;
-        await this.storeMediaOkm(materialFile, filePath);
-      }
-
-      materialContentCreate = await db.DatabaseA.transaction();
-      const newMaterialContent = await OKMMaterialContent.create({
-        material_id: material_id,
-        description: description,
-        filepath: filePath,
-      }, { transaction: materialContentCreate });
-      await materialContentCreate.commit();
-
-      return newMaterialContent;
-    } catch (error) {
-      if(materialContentCreate) {
-        await this.removeMediaOkm(filePath);
-        await materialContentCreate.rollback();
-      }
-      throw error;
-    }
-  };
-
-  async detailMaterialContent(id) {
-    try {
-      const materialContent = await OKMMaterialContent.findOne({
-        where: {id: id},
-        include: [
-          {model: OKMMaterial, as: 'contentMaterial'}
-        ],
-      });
-      return materialContent;
-    } catch (error) {
-      throw error
-    }
-  };
-
-  async updateMaterialContent(id, materialId, description, filepath, viewCount, file, authUserId) {
-    let materialContentUpdTrx, newPathFile;
-    try {
-      const materialContentFile = file;
-      const authUser = await this.getUser(authUserId);
-      
-      if(materialContentFile) {
-        const filename = await this.createDateName('materialContent');
-        const filenameWithExt = `${filename}${path.extname(file.originalname)}`;
-        newPathFile = `okm/material/${materialId}/${filenameWithExt}`;
-        await this.storeMediaOkm(materialContentFile, newPathFile);
-      }
-
-      materialContentUpdTrx = await db.DatabaseA.transaction();
-      await OKMMaterialContent.update({
+      materialContentTrx = await db.DatabaseA.transaction();
+      const creating = await OKMMaterialContent.create({
         material_id: materialId,
         description: description,
-        filepath: newPathFile,
+        filepath: filePath,
         view_count: viewCount,
-      },{
-        where: {id: id},
-        transaction: materialContentUpdTrx,
+        is_active: isActive,
       });
-      await materialContentUpdTrx.commit();
-
-      if(materialContentFile && filepath) { await this.removeMediaOkm(filepath) }
-
-      const updated = await this.detailMaterialContent(id);
-      return updated;
+      await materialContentTrx.commit();
+      return creating;
     } catch (error) {
-      console.log(error)
-      if(materialContentUpdTrx) {
-        await materialContentUpdTrx.rollback();
-        await this.removeMediaOkm(filePath);
-      }
-      throw error
-    }
-  };
-
-  async deleteMaterialContent(id) {};
-  /** End Material Content Section */
-
-  /** Question Collection Section */
-  async getAllQuestionCollection(authUserId) {
-    try {
-      const questionsCollection = await OKMQuestionCollection.findAll({
-        include: [
-          {model: OKMQuestionContent, as: 'questions', include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]},
-          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial'}]},
-          {model: OKMQuestionUploadStatus, as: 'uploadedStatus'},
-        ],
-        order: [
-          [{model: OKMQuestionUploadStatus, as: 'uploadedStatus'}, 'id', 'DESC']
-        ],
-      });
-      return questionsCollection;
-    } catch (error) {
-      throw error
-    }
-  };
-
-  async getQuestionCollectionPaginate(currentPage, itemPerPage, query, authUserId) {
-    try {
-      // let currentPage = payload.currentPage;
-      // let itemPerPage = payload.limit; 
-      // let query = payload.query;
-      const questionColl = await this.getAllQuestionCollection();
-      const filtered = questionColl.filter(item => item.title.toLowerCase().includes(query?.toLowerCase()));
-      const countFilteredArray = filtered.length
-      const totalPages = Math.ceil(countFilteredArray/itemPerPage)
-      currentPage = Math.min(Math.max(1, currentPage), totalPages)
-      const startIndex = (currentPage -1)*itemPerPage
-      const endIndex = startIndex + itemPerPage
-      const itemsForPage = filtered.slice(startIndex, endIndex)
-      const from = ((currentPage -1)* itemPerPage) +1
-      const to = Math.min((currentPage * itemPerPage), countFilteredArray)
-      return {
-        items: itemsForPage,
-        total: countFilteredArray,
-        currentPage: Math.max(currentPage, 1),
-        totalPages: totalPages,
-        per_page: itemPerPage,
-        from: Math.max(from, 0),
-        to: to,
-      }
-    } catch (error) {
-      throw error      
-    }
-  };
-
-  async createQuestionCollection(materialContentId, title, level, isActive, creator, files, questionsArray, authUserId) {
-    let createQuestionCollTrx;
-    try {
-      
-      const parsedIsActive = JSON.parse(isActive);
-      const creator = await this.getUser(authUserId);
-      const fileQuestion = await this.getFileByFieldName(files, 'fileExcel');
-
-      createQuestionCollTrx = await db.DatabaseA.transaction();
-      const createColl = await OKMQuestionCollection.create({
-        material_content_id: materialContentId,
-        title: title.toUpperCase(),
-        level: level,
-        is_active: parsedIsActive,
-        created_by: creator?.fname,
-      },{ transaction: createQuestionCollTrx });
-      await createQuestionCollTrx.commit();
-
-      if(fileQuestion) {
-        const filename = await this.createDateName('excelQuestion');
-        const filenameWithExt = `${filename}${path.extname(fileQuestion.originalname)}`;
-        const filePath = `okm/temporary/${filenameWithExt}`;
-        await this.storeMediaOkm(fileQuestion, filePath);
-        const creatingJob = await JobServices.createJob('medium', {
-          type: 'process-excel-okm-question', collection_id: createColl.id, filename: filenameWithExt
-        });
-        const creatingUploadStatus = await this.createQuestionUploadStatus({
-          body: { status: 'queue', question_coll_id: createColl.id },
-        });
-
-        if(!creatingJob || !creatingUploadStatus) { await this.removeMediaOkm(filePath); }
-      }
-
-      if(questionsArray.length > 0) {
-        await this.readQuestionFromForm(createColl.id, questionsArray, files, authUserId)
-      }
-
-      const created = await this.detailQuestionCollection(createColl.id, authUserId);
-      return created;
-    } catch (error) {
-      if(createQuestionCollTrx) { await createQuestionCollTrx.rollback() }
-      throw error
-    }
-  };
-
-  async updateQuestionCollection(id, materialContentId, title, level, isActive, authUserId) {
-    let updateQuestionCollTrx;
-    try {
-      const parsedIsActive = JSON.parse(isActive);
-
-      updateQuestionCollTrx = await db.DatabaseA.transaction();
-      const updating = await OKMQuestionCollection.update({
-        material_content_id: materialContentId,
-        title: title.toUpperCase(),
-        level: level,
-        is_active: parsedIsActive,
-      },{
-        where: { id: id },
-        transaction: updateQuestionCollTrx
-      });
-      await updateQuestionCollTrx.commit();
-
-      const updated = await this.detailQuestionCollection(id, authUserId);
-      return updated;
-    } catch (error) {
-      if(updateQuestionCollTrx) { await updateQuestionCollTrx.rollback() }
+      if(materialContentTrx) { await materialContentTrx.rollback(); }
       throw error;
     }
   };
-
-  async detailQuestionCollection(id, authUserId) {
+  async detailMaterialContent(authUserId, id) {
     try {
-      const questionCollection = await OKMQuestionCollection.findOne({
+      const data = await OKMMaterialContent.findOne({
         where: {id: id},
         include: [
+          {
+            model: OKMQuestionCollection,
+            as: 'contentQuestions',
+            include: [
+              {
+                model: OKMQuestionContent,
+                as: 'questions',
+                include: [{model: OKMQuestionAnswerOptions, as: 'options'}]
+              }
+            ]
+          },
+          {model: OKMMaterial, as: 'contentMaterial'},
+        ],
+      });
+      return data;
+    } catch (error) {
+      throw error;
+    }
+  };
+  async updateMaterialContent(authUserId, id, materialId, description, filePath, viewCount, isActive) {
+    let updateMaterialContentTrx;
+    try {
+      updateMaterialContentTrx = await db.DatabaseA.transaction();
+      const updating = await OKMMaterialContent.update({
+        material_id: materialId,
+        description: description,
+        filepath: filePath,
+        view_count: viewCount,
+        is_active: isActive,
+      },{
+        where: {id: id},
+        transaction: updateMaterialContentTrx,
+      });
+      await updateMaterialContentTrx.commit();
+      return updating;
+    } catch (error) {
+      if(updateMaterialContentTrx) { await updateMaterialContentTrx.rollback(); }
+      throw error;
+    }
+  };
+  async deleteMaterialContent(authUserId, id) {};
+
+  /** QUESTION COLLECTION */
+  async getQuestionCollection(authUserId) {
+    try {
+      const data = await OKMQuestionCollection.findAll({
+        include: [
           {model: OKMQuestionContent, as: 'questions', include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]},
-          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial'}]},
+          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]},
           {model: OKMQuestionUploadStatus, as: 'uploadedStatus'},
         ],
         order: [
           [{model: OKMQuestionUploadStatus, as: 'uploadedStatus'}, 'id', 'DESC']
         ],
       });
-      return questionCollection;
+      return data
     } catch (error) {
-      throw error
+      throw error;
     }
   };
+  async createQuestionCollection(authUserId, materialContentId, title, level, creator, isActive) {
+    let qstCollTrx;
+    try {
+      qstCollTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionCollection.create({
+        material_content_id: materialContentId,
+        title: title.toUpperCase(),
+        level: level,
+        is_active: isActive,
+        created_by: creator,
+      },{transaction: qstCollTrx});
+      await qstCollTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstCollTrx) { await qstCollTrx.rollback(); }
+      throw error;
+    }
+  };
+  async detailQuestionCollection(authUserId, id) {
+    try {
+      const data = await OKMQuestionCollection.findOne({
+        where: {id: id},
+        include: [
+          {model: OKMQuestionContent, as: 'questions', include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]},
+          {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]},
+          {model: OKMQuestionUploadStatus, as: 'uploadedStatus'},
+        ],
+        order: [
+          [{model: OKMQuestionUploadStatus, as: 'uploadedStatus'}, 'id', 'DESC']
+        ],
+      });
+      return data
+    } catch (error) {
+      throw error;
+    }
+  };
+  async updateQuestionCollection(authUserId, id, materialContentId, title, level, creator, isActive) {
+    let qstCollTrx;
+    try {
+      qstCollTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionCollection.update({
+        material_content_id: materialContentId,
+        title: title.toUpperCase(),
+        level: level,
+        is_active: isActive,
+        created_by: creator,
+      },{
+        where: {id: id},
+        transaction: qstCollTrx
+      });
+      await qstCollTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstCollTrx) { await qstCollTrx.rollback(); }
+      throw error;
+    }
+  };
+  async deleteQuestionCollection(authUserId, id) {};
 
-  async deleteQuestionCollection() {};
-  /** End Question Collection Section */
-
-  /** Question Content Section */
-  async getAllQuestionContent(authUser) {
+  /** QUESTION CONTENT */
+  async getQuestionContent(authUserId) {
     try {
       const data = await OKMQuestionContent.findAll({
-        include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]
+        include: [
+          { model: OKMQuestionAnswerOptions, as: 'options' },
+          { model: OKMQuestionCollection, as: 'questionCollection', include: [{model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]}] },
+        ],
       });
-      console.log(data)
       return data
     } catch (error) {
-      throw error
-    }
-  };
-
-  async getQuestionContentPaginate() {};
-
-  async createQuestionContent(collectionId, text, media, type, answerKey, answerOpts) {
-    let createQuestionContentTrx, nextId, dirMediaPath, mediaPath;
-    try {
-      nextId = await getNextAutoIncrementValue('tbl_okm_question_content');
-      dirMediaPath = `okm/question/collection/${collectionId}/Q_${nextId}`;
-
-      if(media) {
-        const filename = await this.createDateName('questionContent');
-        const filenameWithExt = `${filename}.${media.imageData.extension}`;
-        mediaPath = `${dirMediaPath}/${filenameWithExt}`;
-        const bufferData = media.imageData.buffer;
-        await this.storeMediaOkm({buffer: bufferData}, mediaPath);
-      }
-
-      createQuestionContentTrx = await db.DatabaseA.transaction();
-      const createContent = await OKMQuestionContent.create({
-        question_coll_id: collectionId,
-        question_text: text,
-        question_media: media ? mediaPath : null,
-        question_type: type,
-        answer_key: answerKey,
-      },{transaction: createQuestionContentTrx});
-      
-      if(type === 'multiple') {
-        for(const answeropt of answerOpts) {
-          console.log(answeropt)
-          if(answeropt.text || answeropt.media) {
-            await this.createQuestionOption(createContent.id, answeropt.text, answeropt.media, answeropt.value, dirMediaPath, createQuestionContentTrx);
-          }
-        }
-      }
-      await createQuestionContentTrx.commit();
-
-      return createContent;
-    } catch (error) {
-      if(createQuestionContentTrx) { await createQuestionContentTrx.rollback(); }
-      if(nextId) { await OKMQuestionContent.destroy({where: {id: nextId}}); }
-      if(dirMediaPath) { await this.removeDirectoryMediaOkm(dirMediaPath); }
       throw error;
     }
   };
-
-  async detailQuestionContent(id, authUser) {
+  async createQuestionContent(authUserId, collectionId, type, text, mediapath, answerKey, isActive) {
+    let qstContentTrx;
+    try {
+      qstContentTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionContent.create({
+        question_coll_id: collectionId,
+        question_type: type,
+        question_text: text,
+        question_media: mediapath,
+        answer_key: answerKey,
+        is_active: isActive,
+      },{transaction: qstContentTrx})
+      await qstContentTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstContentTrx) { await qstContentTrx.rollback(); }
+      throw error;
+    }
+  };
+  async detailQuestionContent(authUserId, id) {
     try {
       const data = await OKMQuestionContent.findOne({
-        where: { id: id },
-        include: [{ model: OKMQuestionAnswerOptions, as: 'options' }]
-      });
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  async updateQuestionContent(id, collectionId, questionText, questionMedia, questionType, answerKey) {};
-
-  async deleteQuestionContent(id) {};
-  /** End Question Content Section */
-
-  /** Question Option Section */
-  async getAllQuestionOption(authUserId) {
-    try {
-      const data = await OKMQuestionAnswerOptions.findAll();
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  async createQuestionOption(contentId, text, media, value, mediaStorage, transaction) {
-    let createQstOptTrx, mediaPath;
-    try {
-      if(media) {
-        const filename = await this.createDateName('answerOpt');
-        const filenameWithExt = `${filename}.${media.imageData.extension}`;
-        mediaPath = `${mediaStorage}/${filenameWithExt}`;
-        const bufferData = media.imageData.buffer;
-        await this.storeMediaOkm({buffer: bufferData}, mediaPath);
-      }
-
-      const createOpt = await OKMQuestionAnswerOptions.create({
-        question_content_id: contentId,
-        option_text: text,
-        option_media: media ? mediaPath : null,
-        option_value: value,
-      },{transaction});
-
-      return createOpt;
-    } catch (error) {
-      if(transaction) { await transaction.rollback(); }
-      throw error
-    }
-  };
-
-  async detailQuestionOption(id) {
-    try {
-      const data = await OKMQuestionAnswerOptions.findOne({
-        where: { id: id },
+        where: {id: id},
+        include: [
+          { model: OKMQuestionAnswerOptions, as: 'options' },
+          { model: OKMQuestionCollection, as: 'questionCollection', include: [{model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]}] },
+        ],
       });
       return data
     } catch (error) {
       throw error;
     }
   };
+  async updateQuestionContent(authUserId, id, collectionId, type, text, mediapath, answerKey, isActive) {
+    let qstContentTrx;
+    try {
+      qstContentTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionContent.update({
+        question_coll_id: collectionId,
+        question_type: type,
+        question_text: text,
+        question_media: mediapath,
+        answer_key: answerKey,
+        is_active: isActive,
+      },{
+        where: {id: id},
+        transaction: qstContentTrx
+      })
+      await qstContentTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstContentTrx) { await qstContentTrx.rollback(); }
+      throw error;
+    }
+  };
+  async deleteQuestionContent(authUserId, id) {};
 
-  async updateQuestionOption(id, contentId, text, media, value) {};
+  /** QUESTION OPTIONS */
+  async getQuestionOpts(authUserId) {
+    try {
+      const data = await OKMQuestionAnswerOptions.findAll({
+        include: [
+          {
+            model: OKMQuestionContent,
+            as: 'partContent',
+            include: [
+              {
+                model: OKMQuestionCollection,
+                as: 'questionCollection',
+                include: [
+                  {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]}
+                ] 
+              },
+            ]
+          },
+        ],
+      });
+      return data
+    } catch (error) {
+      throw error;
+    }
+  };
+  async createQuestionOpts(authUserId, contentid, text, mediapath, value, isActive) {
+    let qstOptsTrx;
+    try {
+      qstOptsTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionAnswerOptions.create({
+        question_content_id: contentid,
+        option_text: text,
+        option_media: mediapath,
+        option_value: value,
+        is_active: isActive,
+      },{transaction: qstOptsTrx});
+      await qstOptsTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstOptsTrx) { await qstOptsTrx.rollback(); }
+      throw error;
+    }
+  };
+  async detailQuestionOpts(authUserId, id) {
+    try {
+      const data = await OKMQuestionAnswerOptions.findOne({
+        where: {id: id},
+        include: [
+          {
+            model: OKMQuestionContent,
+            as: 'partContent',
+            include: [
+              {
+                model: OKMQuestionCollection,
+                as: 'questionCollection',
+                include: [
+                  {model: OKMMaterialContent, as: 'partMaterial', include: [{model: OKMMaterial, as: 'contentMaterial', include:[{model: AppDeptModel, as: 'materialDeptOKM'}]}]}
+                ] 
+              },
+            ]
+          },
+        ],
+      });
+      return data
+    } catch (error) {
+      throw error;
+    }
+  };
+  async updateQuestionOpts(authUserId, id, contentid, text, mediapath, value, isActive) {
+    let qstOptsTrx;
+    try {
+      qstOptsTrx = await db.DatabaseA.transaction();
+      const data = await OKMQuestionAnswerOptions.update({
+        question_content_id: contentid,
+        option_text: text,
+        option_media: mediapath,
+        option_value: value,
+        is_active: isActive,
+      },{
+        where: {id: id},
+        transaction: qstOptsTrx
+      });
+      await qstOptsTrx.commit();
+      return data;
+    } catch (error) {
+      if(qstOptsTrx) { await qstOptsTrx.rollback(); }
+      throw error;
+    }
+  };
+  async deleteQuestionOpts(authUserId, id) {};
+  async getQuestionOptsByContentId(authUserId, content_id) {
+    try {
+      const allData = await this.getQuestionOpts(authUserId);
+      const filteredContentId = await allData.filter(item => item.question_content_id === parseInt(content_id));
+      return filteredContentId;
+    } catch (error) {
+      throw error;
+    }
+  };
 
-  async deleteQuestionOption(id) {};
+  /** QUESTION UPLOAD LOG */
+  async createQuestionUploadStatus(authUserId, status, questionCollId) {
+    let qstUploadTrx;
+    try {
+      qstUploadTrx = await db.DatabaseA.transaction();
+      const logs = await OKMQuestionUploadStatus.create({
+        status: status,
+        question_coll_id: questionCollId,
+      },{transaction: qstUploadTrx});
+      await qstUploadTrx.commit();
+      return logs;
+    } catch (error) {
+      if(qstUploadTrx) { await qstUploadTrx.rollback(); }
+      throw error
+    }
+  };
 
-  async storeMediaQuestion() {};
-  /** End Question Option Section */
-
-  /** Quiz Section */
+  /** Quiz */
   async getAllQuiz() {};
-  async getQuizPaginate() {};
   async createQuiz() {};
   async detailQuiz() {};
   async updateQuiz() {};
-  async deleteQuiz() {};
-  /** End Quiz Section */
 
-  /** Participant Section */
-  async createParticipant() {};
-  async detailParticipant() {};
-  async updateParticipant() {};
-  async deleteParticipant() {};
-  /** End Participant Section */
-
-  /** Participant Response Section */
-  async createParticipantResponse() {};
-  async detailParticipantResponse() {};
-  async updateParticipantResponse() {};
-  async deleteParticipantResponse() {};
-  /** End Participant Response Section */
-
-  /** Validator Section*/
-  inputMaterialValidator(title, sinopsis, level, deptId, isActive, createdBy) {
-    const errors = [];
-    if(!title) errors.push('Title is required.');
-    if(!level) errors.push('Level is required.');
-    if(!deptId) errors.push('Department identity is required.');
-    if(!isActive) errors.push('Status is required.');
-    if(!createdBy) errors.push('Creator name is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputMaterialContentValidator(materialId, description, filepath, viewCount) {
-    const errors = [];
-    if(!materialId) errors.push('Material identity is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputMaterialFileValidator(file) {
-    const errors = [];
-
-    const acceptedMimes = ['application/pdf'];
-    const maxFileSize = 6 * 1024 * 1024; // 6Mb
-    if(!acceptedMimes.includes(file.mimetype)) { errors.push('Only accept PDF file.') };
-    if(maxFileSize < file.size) { errors.push('File size exceeds the limit (6 MB).') };
-
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputQuestionCollectionValidator(materialContentId, title, level, isActive, createdBy) {
-    const errors = [];
-    if(!materialContentId) errors.push('Material-Content identity is required.');
-    if(!title) errors.push('Title is required.');
-    if(!level) errors.push('Level is required.');
-    if(!isActive) errors.push('Status is required.');
-    if(!createdBy) errors.push('Creator name is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputQuestionFileValidator(file) {
-    const errors = [];
-
-    const acceptedMimes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-    const maxFileSize = 3 * 1024 * 1024; // 3 Mb
-    if(!acceptedMimes.includes(file.mimetype)) { errors.push('Only accept PDF file.') };
-    if(maxFileSize < file.size) { errors.push('File size exceeds the limit (3 MB).') };
-
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputQuestionContentValidator(questionCollectionId, questionType, questionText, questionMedia, answerKey) {
-    const errors = [];
-    if(!questionCollectionId) errors.push('Question-Collection identity is required.');
-    if(!questionType) errors.push('Question type is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputQuestionAnswerOptValidator(questionContentId, optText, optMedia, optValue) {
-    const errors = [];
-    if(!questionContentId) errors.push('Question-Content identity is required.');
-    if(!optValue) errors.push('Option Value is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputQuizValidator(title, materialContentId, questionCollId, totalQuestion, score, timer, startDate, endDate, type, notes, isActive, creator ) {
-    const errors = [];
-    if(!title) errors.push('Title is required.');
-    if(!materialContentId) errors.push('Material-Content is required.');
-    if(!questionCollId) errors.push('Question-Collection is required.');
-    if(!totalQuestion) errors.push('Input total question is required.');
-    if(!score) errors.push('Score is required.');
-    if(!timer) errors.push('Timer is required.');
-    if(!startDate) errors.push('Start of Quiz is required.');
-    if(!endDate) errors.push('End of Quiz is required.');
-    if(!type) errors.push('Type Quiz is required.');
-    if(!isActive) errors.push('Status is required.');
-    if(!creator) errors.push('Creator name is required.');
-    return { success: errors.length === 0, message: errors };
-  };
-
-  inputParticipantValidator(quizId, userNik, timeLeft, startDate, endDate, status, certificatePath) {
-    const errors = [];
-    if(!quizId) errors.push('Quiz identity is required.');
-    if(!userNik) errors.push('User NIK is required.');
-    if(!timeLeft) errors.push('User time left is required.');
-    if(!status) errors.push('User quiz status is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputParticipantResponseValidator(participantId, questionContentId) {
-    const errors = [];
-    if(!participantId) errors.push('Participant identity is required.');
-    if(!questionContentId) errors.push('Question-Content identity is required.');
-    return { success: errors.length === 0, message: errors }
-  };
-
-  inputCertificateValidator(quizId, signer, designPath) {
-    const errors = [];
-    if(!quizId) errors.push('Quiz identity is required.');
-    if(!signer) errors.push('Signer name is required.');
-    if(!designPath) errors.push('Certificate Image Path is required.');
-    return { success: errors.length === 0, message: errors }
-  }
-  /** End Validator Section */
-
-  /** Misc */
-  async readQuestionFromExcel(collection_id, filename) {
-    
+  /** MISC */
+  async readQuestionFromExcel(authUserId, collection_id, filename) {
     function checkArrayImages (array, ref) {
       const finding =  array.find(item => item.cell === ref)
       if(!finding) { return false }
@@ -658,9 +496,8 @@ class OKMServices {
 
     try {
       const filePath = `okm/temporary/${filename}`;
-      // const nameExcel = 'excelQuestion_1723188346.xlsx';
-      // const filePath = `okm/temporary/${nameExcel}`;
       const question_coll_id = collection_id;
+      let seedingStatus = false;
 
       const arrayImages = [];
       const dataFromExcel = [];
@@ -671,7 +508,7 @@ class OKMServices {
       const worksheet = workbook.getWorksheet('Sheet1');
       const rowLimit = worksheet.actualRowCount;
       const initializeForm = worksheet.getCell('A1').value;
-      
+
       if(initializeForm !== 'Form_by_IT') {
         console.log(pc.bgRed(`OKM-QUESTION: No Valid Form (missing 'Form_by_IT' indicator).`));
         return new Error(`No Valid Form (missing 'Form_by_IT' indicator).`);
@@ -680,7 +517,7 @@ class OKMServices {
         console.log(pc.bgRed(`OKM-QUESTION: No Data from file.`));
         return new Error(`No Data from file.`);
       }
-      
+
       const rowRange = Array.from({length: rowLimit - startRow +1}, (_, i) => i +startRow);
       worksheet.getImages().forEach(image => {
         const imageId = image.imageId;
@@ -696,222 +533,369 @@ class OKMServices {
         }
         arrayImages.push(object)
       });
-      
+
       for (const row of rowRange) {
-       
         /** Question (Cell B-C), AnswerKey (Cell L), Type (Cell M) */
         let eachQuestion = {
-          collection_id: question_coll_id,
+          collection_id: collection_id,
           text: worksheet.getCell(`B${row}`).value,
           media: checkArrayImages(arrayImages, `C${row}`),
           key: worksheet.getCell(`L${row}`).value,
           type: worksheet.getCell(`M${row}`).value,
+          isActive: 1,
         }
         if(eachQuestion.type === 'multiple') {
-
           /** AnswerOptions (Cell D-K) */
           const answersOpt = [];
           const opt1 = {
             text: worksheet.getCell(`D${row}`).value,
             media: checkArrayImages(arrayImages, `E${row}`),
             value: 1,
+            isActive: 1,
           };
           const opt2 = {
             text: worksheet.getCell(`F${row}`).value,
             media: checkArrayImages(arrayImages, `G${row}`),
             value: 2,
+            isActive: 1,
           };
           const opt3 = {
             text: worksheet.getCell(`H${row}`).value,
             media: checkArrayImages(arrayImages, `I${row}`),
             value: 3,
+            isActive: 1,
           };
           const opt4 = {
             text: worksheet.getCell(`J${row}`).value,
             media: checkArrayImages(arrayImages, `K${row}`),
             value: 4,
+            isActive: 1,
           };
           answersOpt.push(opt1,opt2,opt3,opt4)
           eachQuestion.answersOpt = answersOpt;
         }
-
         dataFromExcel.push(eachQuestion);
       }
-      const seeding = await this.seedingQuestionFromExcel(dataFromExcel);
-      await this.createQuestionUploadStatus({body: { status: 'success', question_coll_id: collection_id }});
-      await this.removeMediaOkm(filePath)
-      return seeding;
+
+      // if(dataFromExcel.length > 0){
+      //   for(const [idxQst, question] of dataFromExcel.entries()) {
+      //     const nextId = await getNextAutoIncrementValue('tbl_okm_question_content');
+      //     const dirMediaPath = `okm/question/collection/${collection_id}/Q_${nextId}`;
+
+      //     let mediaPath = null;
+      //     if(question.media) {
+      //       const filename = await this.createDateName('questionContent');
+      //       const filenameWithExt = `${filename}.${question.media.imageData.extension}`;
+      //       mediaPath = `${dirMediaPath}/${filenameWithExt}`;
+      //       const bufferData = question.media.imageData.buffer;
+      //       await this.storeMedia(mediaPath, bufferData);
+      //     }
+          
+      //     const creatingContent = await this.createQuestionContent(
+      //       authUserId,
+      //       question.collection_id,
+      //       question.type,
+      //       question.text,
+      //       mediaPath,
+      //       question.key,
+      //       question.isActive,
+      //     );
+      //     console.log(pc.bgGreen(pc.black(`OKMServices-readQuestionFromExcel: Qst_${idxQst} seeded.`)));
+
+      //     if(creatingContent && question.type === 'multiple') {
+      //       for(const [idxOpt, opt] of question.answersOpt.entries()) {
+
+      //         let mediaPathOpt = null;
+      //         if(opt.media) {
+      //           const filenameOpt = await this.createDateName('questionContent');
+      //           const filenameOptWithExt = `${filenameOpt}.${opt.media.imageData.extension}`;
+      //           mediaPathOpt = `${dirMediaPath}/${filenameOptWithExt}`;
+      //           await this.storeMedia(mediaPathOpt, opt.media.imageData.buffer);
+      //         }
+      //         const creatingOpts = await this.createQuestionOpts(
+      //           authUserId,
+      //           creatingContent.id,
+      //           opt.text,
+      //           mediaPathOpt,
+      //           opt.value,
+      //           opt.isActive,
+      //         );
+      //         console.log(pc.bgGreen(pc.black(`OKMServices-readQuestionFromExcel: Opt_${idxOpt} seeded, part of Qst_${idxQst}.`)));
+      //       }
+      //     }
+      //   }
+      // }
+      const seeding = await this.seedingQuestions(authUserId, dataFromExcel, collection_id);
+      await this.createQuestionUploadStatus(authUserId, 'success', collection_id);
+      await this.removePath(filePath);
+      return true;
     } catch (error) {
-      // console.log(error)
-      await this.createQuestionUploadStatus({body: { status: 'failed', question_coll_id: collection_id }});
+      await this.createQuestionUploadStatus(authUserId, 'failed', collection_id);
       throw error
     }
   };
-
-  async seedingQuestionFromExcel(arrayQuestion) {
-    try {
-      if(arrayQuestion.length <=0) {
-        console.log(pc.bgYellow(`OKM-QUESTION: No Array Questions provided.`));
-        return false
+  async readQuestionFromForm(authUserId, questionsArray, mediaArray, collection_id) {
+    const findingIndex = (fieldName) => {
+      return (fieldName.split('_').filter(part => !isNaN(part))).map(Number);
+    };
+    const checkMedia = async (medias, fieldName) => {
+      const mediaByFieldName = await this.getFileByFieldName(medias, fieldName);
+      const [type, subtype] = mediaByFieldName.mimetype.split('/');
+      return {
+        imageId: null,
+        cell: null,
+        imageData: {
+          type: type,
+          name: fieldName,
+          extension: subtype,
+          buffer: mediaByFieldName.buffer,
+          index: fieldName.includes('options') ? findingIndex(fieldName)[1] : findingIndex(fieldName)[0],
+        }
       }
+    };
+    try {
+      const dataFromForm = [];
+      for (const [index, item] of questionsArray.entries()) {
+        let eachQuestion = {
+          collection_id: item.collection_id,
+          text: item.text,
+          media: JSON.parse(item.media) ? await checkMedia(mediaArray, `questions_${index}_media`) : false,
+          key: item.answerKey ? item.answerKey : null,
+          type: item.type,
+          isActive: item.isActive,
+        }
+        if(eachQuestion.type === 'multiple') {
+          const answersOpt = await Promise.all(item.options.map(async (itemOpt, indexOpt) => {
+            return {
+              text: itemOpt.text,
+              media: JSON.parse(itemOpt.media) ? await checkMedia(mediaArray, `questions_${index}_options_${indexOpt}_media`) : false,
+              value: itemOpt.value,
+              isActive: itemOpt.isActive,
+            };
+          }));
+          eachQuestion.answersOpt = answersOpt;
+        }
+        dataFromForm.push(eachQuestion);
+      }
+      const seeding = await this.seedingQuestions(authUserId, dataFromForm, collection_id);
+      return true;
+    } catch (error) {
+      throw error;
+    }
+  };
+  async seedingQuestions(authUserId, questionArray, collection_id) {
+    try {
+      if(questionArray.length > 0){
+        for(const [idxQst, question] of questionArray.entries()) {
+          const nextId = await getNextAutoIncrementValue('tbl_okm_question_content');
+          const dirMediaPath = `okm/question/collection/${collection_id}/Q_${nextId}`;
 
-      for(const [index, question] of arrayQuestion.entries()) {
-        // console.log(question)
-        const creatingContent = await this.createQuestionContent(
-          question.collection_id,
-          question.text,
-          question.media,
-          question.type,
-          question.key,
-          question.answersOpt,
-        );
+          let mediaPath = null;
+          if(question.media) {
+            const filename = await this.createDateName('questionContent');
+            const filenameWithExt = `${filename}.${question.media.imageData.extension}`;
+            mediaPath = `${dirMediaPath}/${filenameWithExt}`;
+            const bufferData = question.media.imageData.buffer;
+            await this.storeMedia(mediaPath, bufferData);
+          }
+          
+          const creatingContent = await this.createQuestionContent(
+            authUserId,
+            question.collection_id,
+            question.type,
+            question.text,
+            mediaPath,
+            question.key,
+            question.isActive,
+          );
+          console.log(pc.bgGreen(pc.black(`OKMServices-readQuestionFromExcel: Qst_${idxQst} seeded.`)));
+
+          if(creatingContent && question.type === 'multiple') {
+            for(const [idxOpt, opt] of question.answersOpt.entries()) {
+
+              let mediaPathOpt = null;
+              if(opt.media) {
+                const filenameOpt = await this.createDateName('questionContent');
+                const filenameOptWithExt = `${filenameOpt}.${opt.media.imageData.extension}`;
+                mediaPathOpt = `${dirMediaPath}/${filenameOptWithExt}`;
+                await this.storeMedia(mediaPathOpt, opt.media.imageData.buffer);
+              }
+              const creatingOpts = await this.createQuestionOpts(
+                authUserId,
+                creatingContent.id,
+                opt.text,
+                mediaPathOpt,
+                opt.value,
+                opt.isActive,
+              );
+              console.log(pc.bgGreen(pc.black(`OKMServices-readQuestionFromExcel: Opt_${idxOpt} seeded, part of Qst_${idxQst}.`)));
+            }
+          }
+        }
       }
       return true;
     } catch (error) {
-      throw error
-    }
-  };
-
-  async createQuestionUploadStatus(payload) {
-    let createUploadStatusTrx;
-    try {
-      const { upload_id, status, question_coll_id } = payload.body;
-      
-      createUploadStatusTrx = await db.DatabaseA.transaction();
-      const creatingUpload = await OKMQuestionUploadStatus.create({
-        status: status,
-        question_coll_id: question_coll_id,
-      },{ transaction: createUploadStatusTrx });
-      await createUploadStatusTrx.commit();
-
-      return creatingUpload;
-    } catch (error) {
-      if(createUploadStatusTrx) { await createUploadStatusTrx.rollback(); }
       throw error;
     }
   };
-
-  async readQuestionFromForm(collectionId, questionsArray, mediaArray, authUserId) {
+  async storeMedia(filepath, dataBuffer){
     try {
-      // console.info({collection_id: collectionId, questionsArray: questionsArray, mediaArray: mediaArray, authUserId: authUserId});
-      const findingMedia = async (mediaArray, fieldName) => {
-        const mediaByFieldName = await this.getFileByFieldName(mediaArray, fieldName);
-        
-        
+      const fullPath = path.join(this.appStorage, filepath);
+      await fs.mkdir(path.dirname(fullPath),{ recursive: true });
+      await fs.writeFile(fullPath, dataBuffer);
+      console.log(pc.bgGreen(pc.black(`OKMServices-storeMedia: file media stored.`)))
+    } catch (error) {
+      console.error(pc.bgRed(pc.white(`OKMServices-storeMedia: ${error}`)));
+    }
+  };
+  async removePath(filepath) {
+    try {
+      const fullPath = path.join(this.appStorage, filepath);
+      const stats = await fs.stat(fullPath);
+
+      if(stats.isDirectory()) {
+        const items = await fs.readdir( fullPath, {withFileTypes: true});
+        for (const item of items) {
+          const fullpath = path.join(fullPath, item.name);
+          if(item.isDirectory()) { await this.removePath(fullpath) }
+          else { await fs.unlink(fullpath); }
+        }
+        await fs.rmdir(fullPath);
+        console.log(pc.bgGreen(pc.black(`OKMServices-removePath: ${fullPath} remove completely.`)))
       }
-
-      // const findingMedia = await this.getFileByFieldName(mediaArray, fieldName);
-
-      // function checkArrayImage(mediaArray, fieldName) {
-      //   // const finding = await getFileByFieldName(mediaArray, fieldName);
-      //   const [type, subtype] = findingMedia.mimetype.split('/');
-      //   const question_media_index = fieldName.match(/_(\d+)_/);
-      //   const obj = {
-      //     imageId: null,
-      //     cell: null,
-      //     imageData: {
-      //       type: type,
-      //       name: fieldName,
-      //       extension: subtype,
-      //       buffer: findingMedia.buffer,
-      //       index: question_media_index,
-      //     }
-      //   }
-      //   return obj;
-      // }
-
-      // for (const [index, item] of questionsArray.entries()) {
-      //   let eachQuestion = {
-      //     collection_id: collectionId,
-      //     text: item.text,
-      //     media: (item.media === 'true' || item.media === true) ? checkArrayImage(mediaArray, `question_${index}_media`) : false,
-      //     key: item.answerKey,
-      //     type: item.type,
-      //   }
-
-      //   console.log({eachQuestion: eachQuestion})
-      // }
+      else if(stats.isFile()) {
+        await fs.unlink(fullPath);
+        console.log(pc.bgGreen(pc.black(`OKMServices-removePath: ${fullPath} file removed`)))
+      }
+      else { console.log(pc.bgYellow(pc.black(`OKMServices-removePath: ${fullPath} undefined`))); }
     } catch (error) {
-      throw error;
+      console.error(pc.bgRed(pc.white(`OKMServices-removePath: ${error}`)));
     }
   };
-
-  async createOkmLogs(payload, authUserId) {
-    let createLogTrx;
-    try {
-      const userauth = await this.getUser(authUserId);
-      const { message } = payload.body;
-
-      createLogTrx = await db.DatabaseA.transaction();
-      const logging = await OKMLogs.create({
-        message: message,
-        created_by: userauth?.fname,
-      }, {transaction: createLogTrx });
-      await createLogTrx.commit();
-
-      return logging;
-    } catch (error) {
-      if(createLogTrx) { await createLogTrx.rollback(); }
-      throw error;
-    }
+  async createDateName(type) {
+    const currentTimeInMilliseconds = Date.now();
+    const currentTimeInSecond = Math.floor(currentTimeInMilliseconds/1000);
+    const result = `${type}_${currentTimeInSecond}`;
+    console.log(pc.bgGreen(pc.black(`OKMServices-createDateName: ${result} generated.`)))
+    return result;
   };
-
+  async getFileByFieldName(files, fieldName) {
+    const file = files.find(obj => obj.fieldname === fieldName);
+    if(file) { return file }
+    else { console.info(pc.bgYellow(pc.black(`OKMServices-getFileByFieldName: Fieldname not found!`))); return false }
+  };
   async getUser(id) {
     try {
       const user = await AppUserModel.findOne({
         where: {user_id: id},
       });
       if(!user) { return null }
-      return user
+      return user.fname
     } catch (error) {
       throw error
     }
   };
-
-  async createDateName(type) {
+  async getParticipantList(){
     try {
-      const currentTimeInMilliseconds = Date.now();
-      const currentTimeInSecond = Math.floor(currentTimeInMilliseconds/1000)
-      const result = `${type}_${currentTimeInSecond}`
-      return result
-    } catch (e) {
-      return e
-    }
-  };
+      let lists = [
+        { L00: '(ALL) KARYAWAN' },
+        { L34: '(ALL) MANAGER' },
+        { L55: '(ALL) SUPERVISOR' },
+        { L66: '(ALL) STAFF' },
+      ];
 
-  async storeMediaOkm(file, filePath) {
-    try {
-      const fullPath = path.join(this.appStorage, filePath);
-      fs.mkdirSync(path.dirname(fullPath),{ recursive: true });
-      fs.writeFileSync(fullPath, file.buffer);
-      return true
-    } catch (error) {
-      throw error
-    }
-  };
+      const allDepts = await HRServices.getAllDeptData()
+        .then(result => result.filter(item => item.is_active === 1))
+        .then(result => result.sort((a,b) => a.name.localeCompare(b.name)))
+        .then(result => result.map(dept => ({[dept.dept_unique_str]: `(DEPT) ${dept.name}`})));
+      const allPositions = await HRServices.getAllPositionData()
+        .then(result => result.filter(item => item.is_active === 1))
+        .then(result => result.sort((a,b) => a.name.localeCompare(b.name)))
+        .then(result => result.map(pos => ({[pos.position_unique_str]: `(POS) ${pos.name}`})));
+      const users = await AppUserModel.findAll({where: {is_active: 1, nik: {[Op.ne]: null, [Op.lt]: 8000000}}, order: [['fname', 'ASC']]})
+        .then(result => result.map(user => ({[user.nik]: user.fname})));
 
-  async removeMediaOkm(filePath) {
-    try {
-      fs.unlinkSync(path.join(this.appStorage, filePath))
-      return true
-    } catch (error) {
-      throw error
-    }
-  };
-
-  async removeDirectoryMediaOkm(dirPath) {
-    try {
-      fs.rmSync(path.dirname(dirPath), {recursive: true, force: true});
+      const combinedArray = [...lists, ...allDepts, ...allPositions, ...users];
+      return combinedArray;
     } catch (error) {
       throw error;
     }
   };
 
-  async getFileByFieldName (files, fieldName){
-    const file = files.find(obj => obj.fieldname === fieldName);
-    if(file) { return file }
-    else { console.info(pc.bgYellow(pc.black(`OKMServices-getFileByFieldName: Field name not found!`))); return false }
+  /** VALIDATION */
+  inputMaterial(title, level, deptId, isActive) {
+    const errors = [];
+    if(!title) errors.push('Title is required.');
+    if(!level) errors.push('Level is required.');
+    if(!deptId) errors.push('Department identity is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputMaterialContent(materialId, isActive) {
+    const errors = [];
+    if(!materialId) errors.push('Material identity is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputQuestionCollection(materialContentId, title, level, isActive) {
+    const errors = [];
+    if(!materialContentId) errors.push('Material Content identity is required.');
+    if(!title) errors.push('Title is required.');
+    if(!level) errors.push('Level is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputQuestionContent(qstCollectionId, type, isActive) {
+    const errors = [];
+    if(!qstCollectionId) errors.push('Question Collection identity is required.');
+    if(!type) errors.push('Type is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputQuestionOptions(qstContentId, value, isActive) {
+    const errors = [];
+    if(!qstContentId) errors.push('Question Content identity is required.');
+    if(!value) errors.push('Value Option is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputQuiz(title, materialContentId, questionCollId, totalQuestion, score, timer, startDatetime, endDatetime, type, isActive) {
+    const errors = [];
+    if(!title) errors.push('Title is required.');
+    if(!materialContentId) errors.push('Material Content identity is required.');
+    if(!totalQuestion) errors.push('Question Collection identity is required.');
+    if(!score) errors.push('Score is required.');
+    if(!timer) errors.push('timer identity is required.');
+    if(!startDatetime) errors.push('Start Datetime is required.');
+    if(!endDatetime) errors.push('End Datetime is required.');
+    if(!type) errors.push('Type is required.');
+    if(!isActive) errors.push('Status is required.');
+    return { success: errors.length === 0, message: errors }
+  };
+  inputFileExcel(file) {
+    const errors = [];
+    const acceptedMimes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+    const maxFileSize = 3 * 1024 * 1024; // 3 Mb
+    if(!acceptedMimes.includes(file.mimetype)) { errors.push('Only accept XLSX file.') };
+    if(maxFileSize < file.size) { errors.push('File size exceeds the limit (3 MB).') };
+    return { success: errors.length === 0, message: errors };
+  };
+  inputFileImage(file) {
+    const errors = [];
+    const acceptedMimes = ['image/jpeg', 'image/jpg'];
+    const maxFileSize = 1 * 1024 * 1024; // 1 Mb
+    if(!acceptedMimes.includes(file.mimetype)) { errors.push('Only accept JPEG/JPG file.') };
+    if(maxFileSize < file.size) { errors.push('File size exceeds the limit (1 MB).') };
+    return { success: errors.length === 0, message: errors };
+  };
+  inputFilePDF(file) {
+    const errors = [];
+    const acceptedMimes = ['application/pdf'];
+    const maxFileSize = 6 * 1024 * 1024; // 6Mb
+    if(!acceptedMimes.includes(file.mimetype)) { errors.push('Only accept PDF file.') };
+    if(maxFileSize < file.size) { errors.push('File size exceeds the limit (6 MB).') };
+    return { success: errors.length === 0, message: errors }
   };
 }
 
-export default new OKMServices()
+export default new OKMServices();
