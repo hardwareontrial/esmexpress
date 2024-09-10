@@ -40,6 +40,7 @@ OKMMaterialContent.init({
   description: {type: DataTypes.STRING(255), allowNull: true},
   filepath: {type: DataTypes.STRING(255), allowNull: true},
   view_count:{type: DataTypes.INTEGER(11), allowNull: true, defaultValue: 0},
+  is_active: {type: DataTypes.TINYINT(1), allowNull: false, defaultValue: 1},
 },{
   sequelize: db.DatabaseA,
   modelName: 'OKMMaterialContent',
@@ -114,7 +115,7 @@ OKMQuestionUploadStatus.init({
   id: {type: DataTypes.BIGINT(20).UNSIGNED, autoIncrement: true, primaryKey: true, allowNull: false},
   status: {type: DataTypes.STRING(255), allowNull: false},
   question_coll_id: {type: DataTypes.BIGINT(20).UNSIGNED, allowNull: false},
-  failed_at: {type: DataTypes.DATE(), allowNull: false, defaultValue: moment().format('YYYY-MM-DD HH:mm:ss')},
+  logged_at: {type: DataTypes.DATE(), allowNull: false, defaultValue: moment().format('YYYY-MM-DD HH:mm:ss')},
 },{
   sequelize: db.DatabaseA,
   modelName: 'OKMQuestionUploadStatus',
