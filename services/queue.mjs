@@ -16,7 +16,7 @@ class  QueueService {
     try {
       const job = await JobServices.getInFrontJob();
       if(!job) {
-        console.log(pc.bgCyan(pc.black(`QUEUE: No Queue`)));
+        // console.log(pc.bgCyan(pc.black(`QUEUE: No Queue`)));
         return
       }
 
@@ -137,10 +137,11 @@ class  QueueService {
 
     else if(parsedData.type === 'process-excel-okm-question') {
       try {
-        const processExcelOkmQuestion = await OKMServices.readQuestionFromExcel(parsedData.collection_id, parsedData.filename)
+        const processExcelOkmQuestion = await OKMServices.readQuestionFromExcel(1, parsedData.collection_id, parsedData.filename)
         return processExcelOkmQuestion;
       } catch (error) {
         await this.createFailQueue(error.message || error)
+        // await OKMServices.removePath(`okm/temporary/${parsedData.filename}`)
         return false;
       }
     }
