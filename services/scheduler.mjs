@@ -6,7 +6,7 @@ import pc from "picocolors";
 const init = () => {
 
   /** EXECUTE QUEUE (EVERY 30s) */
-  nodeCron.schedule('*/30 * * * * *', async () => {
+  nodeCron.schedule('* * * * *', async () => {
     try {
       await QueueService.initQueue();
     } catch (error) {
